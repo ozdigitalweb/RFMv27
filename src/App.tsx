@@ -1857,13 +1857,26 @@ export default function App() {
 
             {/* Card do Programa No Ar ou Card de Promoção (caso contrário) */}
             {isSpecificLiveProgramOnAir && currentLiveProgram ? (
-              <LiveProgramHeroCard
-                program={currentLiveProgram}
-                onOpenHotsite={() => handleSelectProgramHotsite(currentLiveProgram)}
-                stationConfig={stationConfig}
-                promoBanner={currentPromoBanner}
-                onOpenPromoModal={() => setIsPromoModalOpen(true)}
-              />
+              <div className="w-full max-w-md mx-auto">
+                <div className="flex items-center justify-between gap-2 mb-2 px-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="text-[11px] font-black uppercase tracking-wider text-white font-mono">
+                      PROGRAMA AO VIVO NO AR
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-zinc-400 font-mono">
+                    Transmissão Oficial
+                  </span>
+                </div>
+                <LiveProgramHeroCard
+                  program={currentLiveProgram}
+                  onOpenHotsite={() => handleSelectProgramHotsite(currentLiveProgram)}
+                  stationConfig={stationConfig}
+                  promoBanner={currentPromoBanner}
+                  onOpenPromoModal={() => setIsPromoModalOpen(true)}
+                />
+              </div>
             ) : (
               currentPromoBanner && (
                 <PromoBannerCard
