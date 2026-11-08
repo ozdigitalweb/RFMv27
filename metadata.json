@@ -1,0 +1,8 @@
+{
+  "name": "Remix Rebeldia FM - Rádio Web",
+  "description": "Aplicativo oficial da Rádio Web com streaming de áudio ao vivo, compatível com Android (PWA), pedidos musicais, grade de programação, gravador ao vivo e temporizador sleep timer... e integração com redes sociais para compartilhar o que está tocando agora.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
