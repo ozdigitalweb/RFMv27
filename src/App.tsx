@@ -62,6 +62,7 @@ import { ProgramHotsiteModal } from './components/ProgramHotsiteModal';
 import { HostAuthModal } from './components/HostAuthModal';
 import { PromoModal } from './components/PromoModal';
 import { PromoBannerCard } from './components/PromoBannerCard';
+import { LiveProgramHeroCard } from './components/LiveProgramHeroCard';
 import { RebeldiaLogo } from './components/RebeldiaLogo';
 import { AndroidIcon } from './components/AndroidIcon';
 import { AppleIcon } from './components/AppleIcon';
@@ -1325,6 +1326,15 @@ export default function App() {
     return liveDateBanner || activeBanners[0] || null;
   }, [promoBanners, currentLiveProgram]);
 
+  // Verifica se há programa ao vivo na grade neste momento (ou live takeover / atração específica)
+  const isSpecificLiveProgramOnAir = useMemo(() => {
+    if (!currentLiveProgram) return false;
+    if (liveTakeover && liveTakeover.isActive) return true;
+    if (currentLiveProgram.id !== DEFAULT_REB_PROGRAM.id) return true;
+    if (currentLiveProgram.badge === 'Reprise' || currentLiveProgram.badge === 'No Ar') return true;
+    return false;
+  }, [currentLiveProgram, liveTakeover]);
+
   // Handlers for Song Requests
   const handleAddRequest = (newReq: Omit<SongRequest, 'id' | 'timestamp' | 'votes'>) => {
     const item: SongRequest = {
@@ -1845,13 +1855,23 @@ export default function App() {
               </div>
             </div>
 
-            {/* Banner Promocional do Programa / Promoção da Hora no Ar */}
-            {currentPromoBanner && (
-              <PromoBannerCard
-                banner={currentPromoBanner}
-                onOpenPromoModal={() => setIsPromoModalOpen(true)}
+            {/* Card do Programa No Ar ou Card de Promoção (caso contrário) */}
+            {isSpecificLiveProgramOnAir && currentLiveProgram ? (
+              <LiveProgramHeroCard
+                program={currentLiveProgram}
+                onOpenHotsite={() => handleSelectProgramHotsite(currentLiveProgram)}
                 stationConfig={stationConfig}
+                promoBanner={currentPromoBanner}
+                onOpenPromoModal={() => setIsPromoModalOpen(true)}
               />
+            ) : (
+              currentPromoBanner && (
+                <PromoBannerCard
+                  banner={currentPromoBanner}
+                  onOpenPromoModal={() => setIsPromoModalOpen(true)}
+                  stationConfig={stationConfig}
+                />
+              )
             )}
 
             {/* Quick Action Bento Grid */}
