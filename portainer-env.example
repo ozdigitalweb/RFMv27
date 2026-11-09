@@ -1,0 +1,18 @@
+# ==========================================
+# VARIÁVEIS PARA STACK PORTAINER
+# Cole estas no Portainer → Stacks → rebeldiafm → Environment variables
+# ==========================================
+
+# ---------- BANCO ----------
+DB_USER=rebeldiafm
+DB_PASSWORD=senha-forte-do-banco-aqui
+DB_NAME=rebeldiafm
+
+# ---------- APP ----------
+ADMIN_USER=admin@seudominio.com.br
+ADMIN_PASSWORD=senha-super-segura-minimo-16-chars
+GEMINI_API_KEY=sua-chave-gemini-aqui
+RECAPTCHA_SECRET_KEY=6LcjVhcuAAAAAIFWwnG1vKVUe_dvlEZAwGLZIOp-
+
+# ---------- IMAGEM (atualizada automaticamente pelo GitHub Actions) ----------
+APP_IMAGE=ghcr.io/ozdigitalweb/rfmv27:producao

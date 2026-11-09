@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-rebeldiafm}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-rebeldiafm}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - rebeldiafm-network
+
+  app:
+    image: ${APP_IMAGE:-ghcr.io/ozdigitalweb/rfmv27:producao}
+    restart: always
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - db
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${DB_USER:-rebeldiafm}:${DB_PASSWORD}@db:5432/${DB_NAME:-rebeldiafm}?sslmode=disable
+      - SQL_HOST=db
+      - SQL_USER=${DB_USER:-rebeldiafm}
+      - SQL_PASSWORD=${DB_PASSWORD}
+      - SQL_DB_NAME=${DB_NAME:-rebeldiafm}
+      - ADMIN_USER=${ADMIN_USER}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - VITE_RECAPTCHA_SITE_KEY=6LcjVhcuAAAAAGeCjHTfGLoyKVl53YSBS5ZYKqxG
+      - RECAPTCHA_SECRET_KEY=${RECAPTCHA_SECRET_KEY}
+    networks:
+      - rebeldiafm-network
+
+volumes:
+  postgres_data:
+
+networks:
+  rebeldiafm-network:
+    driver: bridge
