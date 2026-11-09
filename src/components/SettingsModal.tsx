@@ -50,7 +50,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       metadataDelaySeconds,
     });
     setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 2500);
+    setTimeout(() => {
+      setSaveSuccess(false);
+      onClose();
+    }, 450);
   };
 
   const currentPalette = getPaletteById(currentPaletteId || 'default-rock');
@@ -480,7 +483,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             className="px-4 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs font-bold transition flex items-center gap-2 cursor-pointer active:scale-95"
           >
             <RefreshCw className="w-3.5 h-3.5" />
-            <span>Testar Conexão de Áudio</span>
+            <span>Refresh Conexão</span>
           </button>
 
           <button

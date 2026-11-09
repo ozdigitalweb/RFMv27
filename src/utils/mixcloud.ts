@@ -15,6 +15,8 @@ export interface MixcloudRecording {
     url: string;
   };
   tags: string[];
+  username?: string;
+  user_name?: string;
 }
 
 // Mapeamento automático de locutores e programas conhecidos da Rebeldia FM para contas no Mixcloud

@@ -149,8 +149,18 @@ export interface RadioStationConfig {
   location: string;
   bitrate: string;
   codec: string;
+  frequency?: string;
   logoUrl?: string; // Logotipo oficial da Emissora
   metadataDelaySeconds?: number; // Retardo em segundos para sincronizar o título com o buffer de áudio (default: 10s)
+}
+
+export interface StationLogosConfig {
+  headerLogo?: string | null;           // 1. Logotipo acima do menu
+  headerComplementText?: string | null; // Texto complementar ao lado do logotipo superior
+  playerCenterLogo?: string | null;     // 2. Logotipo para o centro do círculo do player (somente o maior)
+  footerLogo?: string | null;           // 3. Logotipo para o rodapé
+  windowsTaskbarIcon?: string | null;   // 4. Ícone para barra de Link inferior do Windows / atalho PWA
+  faviconIcon?: string | null;          // 5. Ícone favicon (fiveicon)
 }
 
 export type EqualizerPreset = 'flat' | 'bass' | 'rock' | 'pop' | 'vocal' | 'electronic';

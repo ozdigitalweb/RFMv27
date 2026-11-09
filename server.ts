@@ -445,7 +445,7 @@ async function startServer() {
         whatsappNumber: '5548991984678',
         instagramUrl: 'https://instagram.com/rebeldiafm',
         email: 'radio@rebeldiafm.com.br',
-        location: 'Canoas - RS, Brasil',
+        location: 'Florianopolis / SC, Brasil',
         frequency: 'Web HD & App',
         logoUrl: '/reb_mascot.jpg',
         customLogo: '/reb_mascot.jpg',
@@ -467,7 +467,7 @@ async function startServer() {
         whatsappNumber: configMap.whatsappNumber || '5548991984678',
         instagramUrl: configMap.instagramUrl || 'https://instagram.com/rebeldiafm',
         email: configMap.email || 'radio@rebeldiafm.com.br',
-        location: configMap.location || 'Canoas - RS, Brasil',
+        location: configMap.location || 'Florianopolis / SC, Brasil',
         frequency: configMap.frequency || 'Web HD & App',
         logoUrl: configMap.customLogo || configMap.logoUrl || '/reb_mascot.jpg',
         customLogo: configMap.customLogo || '/reb_mascot.jpg',
@@ -564,6 +564,89 @@ async function startServer() {
     } catch (error) {
       console.error('Error updating station logo:', error);
       res.status(500).json({ error: 'Failed to update station logo' });
+    }
+  });
+
+  // Multi-Slot Station Logos API (Header, Complement Text, Player Center, Footer, Windows Taskbar, Favicon)
+  app.get('/api/station-logos', async (req, res) => {
+    try {
+      const [row] = await db
+        .select()
+        .from(stationSettings)
+        .where(eq(stationSettings.key, 'stationLogosConfig'))
+        .limit(1);
+
+      let parsed: Record<string, any> = {};
+      if (row?.value) {
+        try {
+          parsed = JSON.parse(row.value);
+        } catch {
+          parsed = {};
+        }
+      }
+
+      // Fallback for headerLogo if not set but customLogo exists
+      if (!parsed.headerLogo) {
+        const [logoRow] = await db
+          .select()
+          .from(stationSettings)
+          .where(eq(stationSettings.key, 'customLogo'))
+          .limit(1);
+        if (logoRow?.value) {
+          parsed.headerLogo = logoRow.value;
+        }
+      }
+
+      res.json(parsed);
+    } catch (error) {
+      console.error('Error fetching station logos:', error);
+      res.status(500).json({ error: 'Failed to fetch station logos' });
+    }
+  });
+
+  app.post('/api/station-logos', async (req, res) => {
+    try {
+      const logosConfig = req.body || {};
+      const serialized = JSON.stringify(logosConfig);
+
+      await db
+        .insert(stationSettings)
+        .values({
+          key: 'stationLogosConfig',
+          value: serialized,
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: stationSettings.key,
+          set: {
+            value: serialized,
+            updatedAt: new Date(),
+          },
+        });
+
+      // Synchronize primary customLogo for legacy compatibility
+      const primaryLogo = logosConfig.headerLogo || logosConfig.playerCenterLogo || '';
+      if (primaryLogo) {
+        await db
+          .insert(stationSettings)
+          .values({
+            key: 'customLogo',
+            value: String(primaryLogo),
+            updatedAt: new Date(),
+          })
+          .onConflictDoUpdate({
+            target: stationSettings.key,
+            set: {
+              value: String(primaryLogo),
+              updatedAt: new Date(),
+            },
+          });
+      }
+
+      res.json({ success: true, logos: logosConfig });
+    } catch (error) {
+      console.error('Error saving station logos:', error);
+      res.status(500).json({ error: 'Failed to save station logos' });
     }
   });
 
@@ -1802,17 +1885,17 @@ async function startServer() {
       path: '/',
       title: 'Rebeldia FM - Rádio Web Livre | Rock, Cultura e Resistência',
       description: 'Ouça a rádio livre e independente 24 horas no ar. Rock clássico, indie, programação autoral, pedidos musicais e mural de recados.',
-      keywords: 'radio livre, rebeldia fm, canoas, rock web radio, underground, musica independente',
+      keywords: 'radio livre, rebeldia fm, florianopolis, rock web radio, underground, musica independente',
       canonicalUrl: 'https://rebeldiafm.com.br/',
       ogTitle: 'Rebeldia FM - Rádio Web Livre',
       ogDescription: 'A verdadeira rádio web livre. Rock, cultura, programas autorais e resistência no ar.',
       ogImage: '/reb_mascot.jpg',
       ogType: 'website',
       twitterCard: 'summary_large_image',
-      geoRegion: 'BR-RS',
-      geoPlacename: 'Canoas, Rio Grande do Sul, Brasil',
-      geoPosition: '-29.9189;-51.1794',
-      icbm: '-29.9189, -51.1794',
+      geoRegion: 'BR-SC',
+      geoPlacename: 'Florianopolis, Santa Catarina, Brasil',
+      geoPosition: '-27.5954;-48.5480',
+      icbm: '-27.5954, -48.5480',
       schemaType: 'RadioStation',
       jsonLdCustom: null,
     },
@@ -1820,17 +1903,17 @@ async function startServer() {
       path: '/programas',
       title: 'Grade de Programação Oficial | Rebeldia FM',
       description: 'Confira os 25 programas e 18 locutores oficiais da Rebeldia FM. Rock, punk, blues, hotsites dedicados e reprises.',
-      keywords: 'programacao rebeldia fm, locutores, grade de programas, rock radio, canoas rs',
+      keywords: 'programacao rebeldia fm, locutores, grade de programas, rock radio, florianopolis sc',
       canonicalUrl: 'https://rebeldiafm.com.br/programas',
       ogTitle: 'Programação Oficial - Rebeldia FM',
       ogDescription: 'Conheça todos os programas autorais e a equipe de locutores da Rebeldia FM.',
       ogImage: '/reb_mascot.jpg',
       ogType: 'website',
       twitterCard: 'summary_large_image',
-      geoRegion: 'BR-RS',
-      geoPlacename: 'Canoas, Rio Grande do Sul, Brasil',
-      geoPosition: '-29.9189;-51.1794',
-      icbm: '-29.9189, -51.1794',
+      geoRegion: 'BR-SC',
+      geoPlacename: 'Florianopolis, Santa Catarina, Brasil',
+      geoPosition: '-27.5954;-48.5480',
+      icbm: '-27.5954, -48.5480',
       schemaType: 'RadioStation',
       jsonLdCustom: null,
     },
@@ -1838,17 +1921,17 @@ async function startServer() {
       path: '/mural',
       title: 'Mural de Recados da Comunidade | Rebeldia FM',
       description: 'Envie seu recado, compartilhe mensagens com os locutores e interaja com os ouvintes da rádio livre.',
-      keywords: 'mural de recados, comunidade rebeldia, ouvintes, interacao, canoas rs',
+      keywords: 'mural de recados, comunidade rebeldia, ouvintes, interacao, florianopolis sc',
       canonicalUrl: 'https://rebeldiafm.com.br/mural',
       ogTitle: 'Mural de Recados dos Ouvintes - Rebeldia FM',
       ogDescription: 'Espaço aberto para a voz dos ouvintes. Deixe sua mensagem no ar!',
       ogImage: '/reb_mascot.jpg',
       ogType: 'website',
       twitterCard: 'summary_large_image',
-      geoRegion: 'BR-RS',
-      geoPlacename: 'Canoas, Rio Grande do Sul, Brasil',
-      geoPosition: '-29.9189;-51.1794',
-      icbm: '-29.9189, -51.1794',
+      geoRegion: 'BR-SC',
+      geoPlacename: 'Florianopolis, Santa Catarina, Brasil',
+      geoPosition: '-27.5954;-48.5480',
+      icbm: '-27.5954, -48.5480',
       schemaType: 'Community',
       jsonLdCustom: null,
     },
@@ -1863,28 +1946,28 @@ async function startServer() {
       ogImage: '/reb_mascot.jpg',
       ogType: 'website',
       twitterCard: 'summary_large_image',
-      geoRegion: 'BR-RS',
-      geoPlacename: 'Canoas, Rio Grande do Sul, Brasil',
-      geoPosition: '-29.9189;-51.1794',
-      icbm: '-29.9189, -51.1794',
+      geoRegion: 'BR-SC',
+      geoPlacename: 'Florianopolis, Santa Catarina, Brasil',
+      geoPosition: '-27.5954;-48.5480',
+      icbm: '-27.5954, -48.5480',
       schemaType: 'BroadcastService',
       jsonLdCustom: null,
     },
     '/rebeldia': {
       path: '/rebeldia',
       title: 'Manifesto e História | Rebeldia FM - A Rádio Livre',
-      description: 'Conheça a história de resistência, arte e liberdade da Rebeldia FM em Canoas/RS. Música sem concessões.',
-      keywords: 'historia rebeldia fm, manifesto radio livre, cultura independente canoas',
+      description: 'Conheça a história de resistência, arte e liberdade da Rebeldia FM em Florianopolis / SC. Música sem concessões.',
+      keywords: 'historia rebeldia fm, manifesto radio livre, cultura independente florianopolis',
       canonicalUrl: 'https://rebeldiafm.com.br/rebeldia',
       ogTitle: 'Manifesto Rebeldia FM - Rádio Web Livre',
       ogDescription: 'Nossa história, nossa luta e nosso compromisso com a cultura independente.',
       ogImage: '/reb_mascot.jpg',
       ogType: 'website',
       twitterCard: 'summary_large_image',
-      geoRegion: 'BR-RS',
-      geoPlacename: 'Canoas, Rio Grande do Sul, Brasil',
-      geoPosition: '-29.9189;-51.1794',
-      icbm: '-29.9189, -51.1794',
+      geoRegion: 'BR-SC',
+      geoPlacename: 'Florianopolis, Santa Catarina, Brasil',
+      geoPosition: '-27.5954;-48.5480',
+      icbm: '-27.5954, -48.5480',
       schemaType: 'AboutPage',
       jsonLdCustom: null,
     },
@@ -1915,17 +1998,17 @@ async function startServer() {
               path: cleanPath,
               title: `${found.title} - Com ${found.host} | Rebeldia FM`,
               description: found.description || `Hotsite oficial do programa ${found.title} na Rebeldia FM. Horários, playlist, fotos e podcasts.`,
-              keywords: `rebeldia fm, ${found.title}, ${found.host}, ${found.genre || 'rock'}, canoas rs`,
+              keywords: `rebeldia fm, ${found.title}, ${found.host}, ${found.genre || 'rock'}, florianopolis sc`,
               canonicalUrl: `https://rebeldiafm.com.br${cleanPath}`,
               ogTitle: `${found.title} - Com ${found.host}`,
               ogDescription: found.description || `Ouça ${found.title} na Rebeldia FM com ${found.host}.`,
               ogImage: found.avatarUrl || found.bannerUrl || '/reb_mascot.jpg',
               ogType: 'music.radio_station',
               twitterCard: 'summary_large_image',
-              geoRegion: 'BR-RS',
-              geoPlacename: 'Canoas, Rio Grande do Sul, Brasil',
-              geoPosition: '-29.9189;-51.1794',
-              icbm: '-29.9189, -51.1794',
+              geoRegion: 'BR-SC',
+              geoPlacename: 'Florianopolis, Santa Catarina, Brasil',
+              geoPosition: '-27.5954;-48.5480',
+              icbm: '-27.5954, -48.5480',
               schemaType: 'BroadcastService',
             };
           }
@@ -1952,17 +2035,17 @@ async function startServer() {
       path: cleanPath,
       title: 'Rebeldia FM - Rádio Web Livre',
       description: 'Ouça a rádio livre e independente 24 horas no ar. Rock, cultura e pedidos musicais.',
-      keywords: 'rebeldia fm, radio livre, canoas',
+      keywords: 'rebeldia fm, radio livre, florianopolis',
       canonicalUrl: `https://rebeldiafm.com.br${cleanPath}`,
       ogTitle: 'Rebeldia FM - Rádio Web Livre',
       ogDescription: 'A verdadeira rádio web livre. Rock, cultura e resistência no ar.',
       ogImage: '/reb_mascot.jpg',
       ogType: 'website',
       twitterCard: 'summary_large_image',
-      geoRegion: 'BR-RS',
-      geoPlacename: 'Canoas, Rio Grande do Sul, Brasil',
-      geoPosition: '-29.9189;-51.1794',
-      icbm: '-29.9189, -51.1794',
+      geoRegion: 'BR-SC',
+      geoPlacename: 'Florianopolis, Santa Catarina, Brasil',
+      geoPosition: '-27.5954;-48.5480',
+      icbm: '-27.5954, -48.5480',
       schemaType: 'RadioStation',
     };
   }
@@ -1986,14 +2069,14 @@ async function startServer() {
     const ogImage = escapeHtml(seo.ogImage || '/reb_mascot.jpg');
     const ogType = escapeHtml(seo.ogType || 'website');
     const twitterCard = escapeHtml(seo.twitterCard || 'summary_large_image');
-    const geoRegion = escapeHtml(seo.geoRegion || 'BR-RS');
-    const geoPlacename = escapeHtml(seo.geoPlacename || 'Canoas, Rio Grande do Sul, Brasil');
-    const geoPosition = escapeHtml(seo.geoPosition || '-29.9189;-51.1794');
-    const icbm = escapeHtml(seo.icbm || '-29.9189, -51.1794');
+    const geoRegion = escapeHtml(seo.geoRegion || 'BR-SC');
+    const geoPlacename = escapeHtml(seo.geoPlacename || 'Florianopolis, Santa Catarina, Brasil');
+    const geoPosition = escapeHtml(seo.geoPosition || '-27.5954;-48.5480');
+    const icbm = escapeHtml(seo.icbm || '-27.5954, -48.5480');
     const schemaType = escapeHtml(seo.schemaType || 'RadioStation');
 
-    const lat = geoPosition.includes(';') ? geoPosition.split(';')[0].trim() : '-29.9189';
-    const lng = geoPosition.includes(';') ? geoPosition.split(';')[1].trim() : '-51.1794';
+    const lat = geoPosition.includes(';') ? geoPosition.split(';')[0].trim() : '-27.5954';
+    const lng = geoPosition.includes(';') ? geoPosition.split(';')[1].trim() : '-48.5480';
 
     const jsonLd = seo.jsonLdCustom || JSON.stringify({
       '@context': 'https://schema.org',
@@ -2003,8 +2086,8 @@ async function startServer() {
       'url': canonical,
       'address': {
         '@type': 'PostalAddress',
-        'addressLocality': 'Canoas',
-        'addressRegion': 'RS',
+        'addressLocality': 'Florianopolis',
+        'addressRegion': 'SC',
         'addressCountry': 'BR'
       },
       'geo': {
@@ -2104,10 +2187,10 @@ ${jsonLd}
         ogImage: String(body.ogImage || '/reb_mascot.jpg'),
         ogType: String(body.ogType || 'website'),
         twitterCard: String(body.twitterCard || 'summary_large_image'),
-        geoRegion: String(body.geoRegion || 'BR-RS'),
-        geoPlacename: String(body.geoPlacename || 'Canoas, Rio Grande do Sul, Brasil'),
-        geoPosition: String(body.geoPosition || '-29.9189;-51.1794'),
-        icbm: String(body.icbm || '-29.9189, -51.1794'),
+        geoRegion: String(body.geoRegion || 'BR-SC'),
+        geoPlacename: String(body.geoPlacename || 'Florianopolis, Santa Catarina, Brasil'),
+        geoPosition: String(body.geoPosition || '-27.5954;-48.5480'),
+        icbm: String(body.icbm || '-27.5954, -48.5480'),
         schemaType: String(body.schemaType || 'RadioStation'),
         jsonLdCustom: body.jsonLdCustom ? String(body.jsonLdCustom) : null,
         updatedAt: new Date(),

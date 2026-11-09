@@ -830,7 +830,7 @@ export const SongRequestsModal: React.FC<SongRequestsModalProps> = ({
                       type="text"
                       value={city}
                       onChange={(e) => setCity(e.target.value)}
-                      placeholder="Ex: Canoas - RS"
+                      placeholder="Ex: Florianopolis / SC"
                       className="w-full px-3.5 py-2.5 rounded-xl mono-input text-xs"
                     />
                   </div>

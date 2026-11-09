@@ -48,10 +48,10 @@ export const AdminSeoSection: React.FC = () => {
     ogImage: '',
     ogType: 'website',
     twitterCard: 'summary_large_image',
-    geoRegion: 'BR-RS',
-    geoPlacename: 'Canoas, Rio Grande do Sul, Brasil',
-    geoPosition: '-29.9189;-51.1794',
-    icbm: '-29.9189, -51.1794',
+    geoRegion: 'BR-SC',
+    geoPlacename: 'Florianopolis, Santa Catarina, Brasil',
+    geoPosition: '-27.5954;-48.5480',
+    icbm: '-27.5954, -48.5480',
     schemaType: 'RadioStation',
     jsonLdCustom: null,
   });
@@ -160,12 +160,12 @@ export const AdminSeoSection: React.FC = () => {
     }
   };
 
-  const handleApplyPresetGeo = (city: 'canoas' | 'portoalegre' | 'brasil') => {
-    if (city === 'canoas') {
-      handleChange('geoRegion', 'BR-RS');
-      handleChange('geoPlacename', 'Canoas, Rio Grande do Sul, Brasil');
-      handleChange('geoPosition', '-29.9189;-51.1794');
-      handleChange('icbm', '-29.9189, -51.1794');
+  const handleApplyPresetGeo = (city: 'florianopolis' | 'portoalegre' | 'brasil') => {
+    if (city === 'florianopolis') {
+      handleChange('geoRegion', 'BR-SC');
+      handleChange('geoPlacename', 'Florianopolis, Santa Catarina, Brasil');
+      handleChange('geoPosition', '-27.5954;-48.5480');
+      handleChange('icbm', '-27.5954, -48.5480');
     } else if (city === 'portoalegre') {
       handleChange('geoRegion', 'BR-RS');
       handleChange('geoPlacename', 'Porto Alegre, Rio Grande do Sul, Brasil');
@@ -419,7 +419,7 @@ export const AdminSeoSection: React.FC = () => {
                   type="text"
                   value={formState.keywords || ''}
                   onChange={(e) => handleChange('keywords', e.target.value)}
-                  placeholder="radio livre, rebeldia, canoas, rock"
+                  placeholder="radio livre, rebeldia, florianopolis, rock"
                   className="w-full bg-zinc-950 border border-zinc-700/80 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-500 transition"
                 />
                 <span className="text-[10px] text-zinc-500 block mt-1">Separadas por vírgula</span>
@@ -673,10 +673,10 @@ export const AdminSeoSection: React.FC = () => {
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-zinc-500 font-bold mr-1">Presets:</span>
               <button
-                onClick={() => handleApplyPresetGeo('canoas')}
+                onClick={() => handleApplyPresetGeo('florianopolis')}
                 className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold hover:bg-amber-500/30 transition"
               >
-                Canoas / RS
+                Florianopolis / SC
               </button>
               <button
                 onClick={() => handleApplyPresetGeo('portoalegre')}
@@ -694,12 +694,12 @@ export const AdminSeoSection: React.FC = () => {
               </label>
               <input
                 type="text"
-                value={formState.geoRegion || 'BR-RS'}
+                value={formState.geoRegion || 'BR-SC'}
                 onChange={(e) => handleChange('geoRegion', e.target.value)}
-                placeholder="Ex: BR-RS"
+                placeholder="Ex: BR-SC"
                 className="w-full bg-zinc-950 border border-zinc-700/80 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-500 transition"
               />
-              <span className="text-[10px] text-zinc-500 block mt-1">Código ISO 3166-2 do estado (ex: BR-RS)</span>
+              <span className="text-[10px] text-zinc-500 block mt-1">Código ISO 3166-2 do estado (ex: BR-SC)</span>
             </div>
 
             <div>
@@ -708,9 +708,9 @@ export const AdminSeoSection: React.FC = () => {
               </label>
               <input
                 type="text"
-                value={formState.geoPlacename || 'Canoas, Rio Grande do Sul, Brasil'}
+                value={formState.geoPlacename || 'Florianopolis, Santa Catarina, Brasil'}
                 onChange={(e) => handleChange('geoPlacename', e.target.value)}
-                placeholder="Ex: Canoas, Rio Grande do Sul, Brasil"
+                placeholder="Ex: Florianopolis, Santa Catarina, Brasil"
                 className="w-full bg-zinc-950 border border-zinc-700/80 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-500 transition"
               />
               <span className="text-[10px] text-zinc-500 block mt-1">Cidade e país de origem da transmissão</span>
@@ -722,9 +722,9 @@ export const AdminSeoSection: React.FC = () => {
               </label>
               <input
                 type="text"
-                value={formState.geoPosition || '-29.9189;-51.1794'}
+                value={formState.geoPosition || '-27.5954;-48.5480'}
                 onChange={(e) => handleChange('geoPosition', e.target.value)}
-                placeholder="-29.9189;-51.1794"
+                placeholder="-27.5954;-48.5480"
                 className="w-full bg-zinc-950 border border-zinc-700/80 rounded-xl px-3.5 py-2 text-sm font-mono text-white focus:outline-none focus:border-amber-500 transition"
               />
               <span className="text-[10px] text-zinc-500 block mt-1">Formato: latitude;longitude com ponto e vírgula</span>
@@ -786,14 +786,14 @@ export const AdminSeoSection: React.FC = () => {
                   url: formState.canonicalUrl || `https://rebeldiafm.com.br${formState.path}`,
                   address: {
                     '@type': 'PostalAddress',
-                    addressLocality: 'Canoas',
-                    addressRegion: 'RS',
+                    addressLocality: 'Florianopolis',
+                    addressRegion: 'SC',
                     addressCountry: 'BR',
                   },
                   geo: {
                     '@type': 'GeoCoordinates',
-                    latitude: formState.geoPosition?.split(';')[0] || '-29.9189',
-                    longitude: formState.geoPosition?.split(';')[1] || '-51.1794',
+                    latitude: formState.geoPosition?.split(';')[0] || '-27.5954',
+                    longitude: formState.geoPosition?.split(';')[1] || '-48.5480',
                   },
                 },
                 null,

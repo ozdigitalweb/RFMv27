@@ -48,7 +48,7 @@ export function downloadKitDeMidiaPDF() {
     doc.setTextColor(212, 212, 216);
     doc.text('Versão Oficial 2026', pageWidth - margin, 20, { align: 'right' });
     doc.text('Transmissão Digital 24h', pageWidth - margin, 26, { align: 'right' });
-    doc.text('Canoas - RS • Brasil', pageWidth - margin, 32, { align: 'right' });
+    doc.text('Florianopolis / SC • Brasil', pageWidth - margin, 32, { align: 'right' });
 
     let y = 56;
 
@@ -250,7 +250,7 @@ export function downloadKitDeMidiaPDF() {
       ['Slogan Oficial:', 'Rádio Livre • O Som que Incomoda o Sistema'],
       ['E-mails Oficiais:', 'radio@rebeldiafm.com.br / rebeldiaFM@gmail.com'],
       ['WhatsApp Ouvintes & Contato:', '+55 (48) 99198-4678'],
-      ['Localização do Estúdio:', 'Canoas - RS, Brasil • Transmissão Global Web'],
+      ['Localização do Estúdio:', 'Florianopolis / SC, Brasil • Transmissão Global Web'],
       ['Website Oficial:', 'https://rebeldiafm.com.br'],
     ];
 

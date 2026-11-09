@@ -52,6 +52,7 @@ import {
   PromoBanner,
   LiveTakeover,
   HostAccount,
+  StationLogosConfig,
 } from './types';
 import { InstallModal } from './components/InstallModal';
 import { SongRequestsModal } from './components/SongRequestsModal';
@@ -78,7 +79,13 @@ import { LiveTakeoverModal } from './components/LiveTakeoverModal';
 import { MusicModeModal } from './components/MusicModeModal';
 import { useAuth } from './context/AuthContext';
 import { api, DbStats, StreamMetadata } from './utils/api';
-import { saveCustomLogo } from './utils/logo';
+import {
+  saveCustomLogo,
+  getStationLogos,
+  fetchAndSyncServerLogos,
+  applyDynamicFavicon,
+  applyDynamicWindowsTile,
+} from './utils/logo';
 import { applyTheme, getSavedPaletteId } from './utils/theme';
 import { getSavedInstitutionalData, saveInstitutionalData, InstitutionalData } from './data/institutional';
 import { applyClientSeo } from './utils/seo';
@@ -176,6 +183,31 @@ export default function App() {
       return DEFAULT_RADIO_CONFIG;
     }
   });
+
+  // Multi-Slot Station Logos State (Header, Player Center, Footer, Windows Taskbar, Favicon)
+  const [stationLogos, setStationLogos] = useState<StationLogosConfig>(getStationLogos);
+
+  useEffect(() => {
+    const handleLogosUpdate = (e: Event) => {
+      const customEvent = e as CustomEvent<StationLogosConfig>;
+      if (customEvent.detail) {
+        setStationLogos(customEvent.detail);
+        if (customEvent.detail.faviconIcon) applyDynamicFavicon(customEvent.detail.faviconIcon);
+        if (customEvent.detail.windowsTaskbarIcon) applyDynamicWindowsTile(customEvent.detail.windowsTaskbarIcon);
+      }
+    };
+
+    window.addEventListener('rebeldia_logos_updated', handleLogosUpdate);
+    fetchAndSyncServerLogos().then((logos) => {
+      if (logos) {
+        setStationLogos(logos);
+        if (logos.faviconIcon) applyDynamicFavicon(logos.faviconIcon);
+        if (logos.windowsTaskbarIcon) applyDynamicWindowsTile(logos.windowsTaskbarIcon);
+      }
+    });
+
+    return () => window.removeEventListener('rebeldia_logos_updated', handleLogosUpdate);
+  }, []);
 
   // Audio Playback State
   const [isPlaying, setIsPlaying] = useState(false);
@@ -1457,12 +1489,12 @@ export default function App() {
           {/* Brand Logo (Responsive for Mobile & Desktop) */}
           <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0 flex-shrink-0">
             <div className="relative group cursor-pointer flex-shrink-0 ml-[5px]" onClick={() => navigateTab('player')}>
-              <RebeldiaLogo variant="full" size="md" />
+              <RebeldiaLogo variant="full" size="md" customLogoUrl={stationLogos.headerLogo} />
             </div>
-            {stationConfig.slogan && (
+            {(stationLogos.headerComplementText || stationConfig.slogan) && (
               <div className="hidden md:flex items-center pl-2 sm:pl-3 border-l border-zinc-800 flex-shrink-0">
-                <span className="text-xs text-zinc-400 font-medium truncate max-w-[180px] lg:max-w-xs">
-                  {stationConfig.slogan}
+                <span className="text-xs text-zinc-400 font-medium truncate max-w-[240px] lg:max-w-xs">
+                  {stationLogos.headerComplementText || stationConfig.slogan}
                 </span>
               </div>
             )}
@@ -1740,13 +1772,22 @@ export default function App() {
                           />
                         ) : (
                           <div className="w-full h-full rounded-full bg-zinc-900 flex items-center justify-center p-4">
-                            <RebeldiaLogo variant="icon" size="md" className="drop-shadow-2xl" />
+                            <RebeldiaLogo
+                              variant="icon"
+                              size="md"
+                              customLogoUrl={stationLogos.playerCenterLogo || stationLogos.headerLogo}
+                              className="drop-shadow-2xl"
+                            />
                           </div>
                         )}
 
-                        {/* Center vinyl spindle (Pino central do disco de vinil) */}
-                        <div className="absolute w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-zinc-950/95 border border-zinc-500/80 flex items-center justify-center shadow-2xl backdrop-blur-sm pointer-events-none">
-                          <RebeldiaLogo variant="icon" size="xs" className="w-5 h-5 sm:w-6 sm:h-6 drop-shadow" />
+                        {/* Center vinyl spindle (Pino central do disco de vinil - SOMENTE NO PLAYER MAIOR) */}
+                        <div className="absolute w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-zinc-950/95 border border-zinc-500/80 flex items-center justify-center shadow-2xl backdrop-blur-sm pointer-events-none overflow-hidden p-1">
+                          <img
+                            src={stationLogos.playerCenterLogo || stationLogos.headerLogo || '/reb_mascot.jpg'}
+                            alt="Centro do Player Maior"
+                            className="w-full h-full rounded-full object-cover drop-shadow"
+                          />
                         </div>
                       </div>
                     </div>
@@ -2067,7 +2108,13 @@ export default function App() {
       {/* Studio Monochromatic Footer */}
       <footer className="border-t border-zinc-800/80 bg-zinc-950 py-8 pb-36 px-[8px] sm:px-[30px] text-center text-xs text-zinc-400">
         <div className="w-full flex flex-col items-center space-y-4">
-          <RebeldiaLogo variant="full" size="sm" showSlogan className="items-center" />
+          <RebeldiaLogo
+            variant="full"
+            size="sm"
+            showSlogan
+            customLogoUrl={stationLogos.footerLogo || stationLogos.headerLogo}
+            className="items-center"
+          />
           <p className="text-zinc-400">
             © {new Date().getFullYear()} {stationConfig.name} • {stationConfig.slogan}
           </p>
@@ -2182,6 +2229,8 @@ export default function App() {
         }}
         promoBanners={promoBanners}
         onSavePromoBanners={handleSavePromoBanners}
+        stationConfig={stationConfig}
+        onSaveStationConfig={handleSaveConfig}
       />
 
       {/* Promoção da Hora & Banners Modal */}

@@ -9,6 +9,7 @@ export interface DbSongRequest {
   artist: string;
   songTitle: string;
   dedicatedTo: string | null;
+  dedication?: string | null;
   message: string | null;
   artworkUrl?: string | null;
   previewUrl?: string | null;
@@ -33,6 +34,7 @@ export interface DbShoutout {
 export interface DbScheduleItem {
   id: number;
   dayOfWeek: number;
+  daysOfWeek?: number[] | null;
   title: string;
   host: string;
   hostRole?: string | null;
@@ -380,6 +382,29 @@ export const api = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ logo: logo || '' }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
+  async getStationLogos(): Promise<any> {
+    try {
+      const res = await fetch('/api/station-logos');
+      if (!res.ok) return {};
+      return await res.json();
+    } catch {
+      return {};
+    }
+  },
+
+  async saveStationLogos(logos: any): Promise<boolean> {
+    try {
+      const res = await fetch('/api/station-logos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(logos || {}),
       });
       return res.ok;
     } catch {

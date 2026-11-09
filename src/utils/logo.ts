@@ -1,91 +1,185 @@
-// Utility to manage custom station logo across the entire app with server & database persistence
+// Utility to manage custom station logos across the entire app with server & database persistence
+import { StationLogosConfig } from '../types';
+
 const LOGO_STORAGE_KEY = 'rebeldia_custom_logo';
+const MULTI_LOGOS_STORAGE_KEY = 'rebeldia_station_logos';
 
 let inMemoryLogo: string | null = null;
+let inMemoryLogos: StationLogosConfig | null = null;
 let hasSyncedWithServer = false;
 
-export function getCustomLogo(): string {
-  if (typeof window === 'undefined') return '/reb_mascot.jpg';
-  if (inMemoryLogo !== null) return inMemoryLogo;
+export const DEFAULT_STATION_LOGOS: StationLogosConfig = {
+  headerLogo: '/reb_mascot.jpg',
+  headerComplementText: 'Florianópolis / SC • 87.9 MHz',
+  playerCenterLogo: '/reb_mascot.jpg',
+  footerLogo: '/reb_mascot.jpg',
+  windowsTaskbarIcon: '/reb_mascot.jpg',
+  faviconIcon: '/reb_mascot.jpg',
+};
+
+export function getStationLogos(): StationLogosConfig {
+  if (typeof window === 'undefined') return { ...DEFAULT_STATION_LOGOS };
+  if (inMemoryLogos !== null) return inMemoryLogos;
+
   try {
-    const saved = localStorage.getItem(LOGO_STORAGE_KEY);
-    if (saved && saved.trim().length > 0) {
-      inMemoryLogo = saved.trim();
-      return inMemoryLogo;
+    const saved = localStorage.getItem(MULTI_LOGOS_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      inMemoryLogos = {
+        headerLogo: parsed.headerLogo || localStorage.getItem(LOGO_STORAGE_KEY) || DEFAULT_STATION_LOGOS.headerLogo,
+        headerComplementText: parsed.headerComplementText ?? DEFAULT_STATION_LOGOS.headerComplementText,
+        playerCenterLogo: parsed.playerCenterLogo || DEFAULT_STATION_LOGOS.playerCenterLogo,
+        footerLogo: parsed.footerLogo || DEFAULT_STATION_LOGOS.footerLogo,
+        windowsTaskbarIcon: parsed.windowsTaskbarIcon || DEFAULT_STATION_LOGOS.windowsTaskbarIcon,
+        faviconIcon: parsed.faviconIcon || DEFAULT_STATION_LOGOS.faviconIcon,
+      };
+      return inMemoryLogos;
     }
   } catch (e) {
-    console.error('Error reading custom logo from storage:', e);
+    console.error('Error reading station logos from storage:', e);
   }
 
-  // Trigger background sync if not done yet
+  // Fallback to legacy single logo if present
+  const legacyLogo = localStorage.getItem(LOGO_STORAGE_KEY);
+  inMemoryLogos = {
+    ...DEFAULT_STATION_LOGOS,
+    headerLogo: legacyLogo || DEFAULT_STATION_LOGOS.headerLogo,
+  };
+
   if (!hasSyncedWithServer) {
-    fetchAndSyncServerLogo();
+    fetchAndSyncServerLogos();
   }
 
-  return '/reb_mascot.jpg';
+  return inMemoryLogos;
 }
 
-export async function fetchAndSyncServerLogo(): Promise<string | null> {
+export function applyDynamicFavicon(faviconUrl?: string | null): void {
+  if (typeof document === 'undefined') return;
+  const url = (faviconUrl && faviconUrl.trim().length > 0) ? faviconUrl.trim() : '/reb_mascot.jpg';
+  
+  const linkIcon = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+  if (linkIcon) linkIcon.href = url;
+  
+  const linkShortcut = document.querySelector<HTMLLinkElement>("link[rel='shortcut icon']");
+  if (linkShortcut) linkShortcut.href = url;
+
+  const linkApple = document.querySelector<HTMLLinkElement>("link[rel='apple-touch-icon']");
+  if (linkApple) linkApple.href = url;
+}
+
+export function applyDynamicWindowsTile(iconUrl?: string | null): void {
+  if (typeof document === 'undefined') return;
+  const url = (iconUrl && iconUrl.trim().length > 0) ? iconUrl.trim() : '/reb_mascot.jpg';
+  
+  let tileMeta = document.querySelector<HTMLMetaElement>("meta[name='msapplication-TileImage']");
+  if (!tileMeta) {
+    tileMeta = document.createElement('meta');
+    tileMeta.name = 'msapplication-TileImage';
+    document.head.appendChild(tileMeta);
+  }
+  tileMeta.content = url;
+}
+
+export async function fetchAndSyncServerLogos(): Promise<StationLogosConfig | null> {
   if (typeof window === 'undefined') return null;
   hasSyncedWithServer = true;
   try {
-    const res = await fetch('/api/station-logo');
+    const res = await fetch('/api/station-logos');
     if (res.ok) {
-      const data = await res.json();
-      const serverLogo = data.logo && data.logo.trim().length > 0 ? data.logo.trim() : null;
-      
-      const localLogo = localStorage.getItem(LOGO_STORAGE_KEY);
-      
-      // If server has a logo that differs from local storage, update local storage and notify
-      if (serverLogo !== localLogo) {
-        if (serverLogo) {
-          localStorage.setItem(LOGO_STORAGE_KEY, serverLogo);
-        } else {
-          localStorage.removeItem(LOGO_STORAGE_KEY);
-        }
-        inMemoryLogo = serverLogo;
-        window.dispatchEvent(
-          new CustomEvent('rebeldia_logo_updated', {
-            detail: serverLogo,
-          })
-        );
+      const serverLogos: StationLogosConfig = await res.json();
+      const current = getStationLogos();
+      const merged: StationLogosConfig = {
+        ...current,
+        ...serverLogos,
+      };
+
+      inMemoryLogos = merged;
+      localStorage.setItem(MULTI_LOGOS_STORAGE_KEY, JSON.stringify(merged));
+
+      if (merged.headerLogo) {
+        localStorage.setItem(LOGO_STORAGE_KEY, merged.headerLogo);
       }
-      return serverLogo;
+
+      // Apply dynamic DOM elements
+      if (merged.faviconIcon) applyDynamicFavicon(merged.faviconIcon);
+      if (merged.windowsTaskbarIcon) applyDynamicWindowsTile(merged.windowsTaskbarIcon);
+
+      window.dispatchEvent(
+        new CustomEvent('rebeldia_logos_updated', {
+          detail: merged,
+        })
+      );
+      window.dispatchEvent(
+        new CustomEvent('rebeldia_logo_updated', {
+          detail: merged.headerLogo,
+        })
+      );
+
+      return merged;
     }
   } catch (e) {
-    console.warn('Could not sync logo with server:', e);
+    console.warn('Could not sync logos with server:', e);
   }
   return null;
 }
 
-export function saveCustomLogo(logoUrlOrData: string | null): void {
+export function saveStationLogos(updated: Partial<StationLogosConfig>): void {
   if (typeof window === 'undefined') return;
-  const normalized = logoUrlOrData && logoUrlOrData.trim().length > 0 ? logoUrlOrData.trim() : null;
-  inMemoryLogo = normalized;
+
+  const current = getStationLogos();
+  const merged: StationLogosConfig = {
+    ...current,
+    ...updated,
+  };
+
+  inMemoryLogos = merged;
 
   try {
-    if (normalized) {
-      localStorage.setItem(LOGO_STORAGE_KEY, normalized);
-    } else {
-      localStorage.removeItem(LOGO_STORAGE_KEY);
+    localStorage.setItem(MULTI_LOGOS_STORAGE_KEY, JSON.stringify(merged));
+    if (merged.headerLogo) {
+      localStorage.setItem(LOGO_STORAGE_KEY, merged.headerLogo);
     }
   } catch (e) {
-    console.error('Error saving custom logo to localStorage:', e);
+    console.error('Error saving logos to localStorage:', e);
   }
 
-  // Broadcast custom event so all mounted components update immediately
+  // Apply immediately to HTML DOM head
+  if (merged.faviconIcon) applyDynamicFavicon(merged.faviconIcon);
+  if (merged.windowsTaskbarIcon) applyDynamicWindowsTile(merged.windowsTaskbarIcon);
+
+  // Broadcast updates
+  window.dispatchEvent(
+    new CustomEvent('rebeldia_logos_updated', {
+      detail: merged,
+    })
+  );
   window.dispatchEvent(
     new CustomEvent('rebeldia_logo_updated', {
-      detail: normalized,
+      detail: merged.headerLogo,
     })
   );
 
-  // Persist asynchronously to Cloud SQL backend so any new browser/device loads it
-  fetch('/api/station-logo', {
+  // Persist to server
+  fetch('/api/station-logos', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ logo: normalized || '' }),
+    body: JSON.stringify(merged),
   }).catch((err) => {
-    console.error('Failed to persist logo to server:', err);
+    console.error('Failed to persist station logos to server:', err);
   });
+}
+
+// Backwards compatibility wrappers
+export function getCustomLogo(): string {
+  const logos = getStationLogos();
+  return logos.headerLogo || '/reb_mascot.jpg';
+}
+
+export function saveCustomLogo(logoUrlOrData: string | null): void {
+  saveStationLogos({ headerLogo: logoUrlOrData });
+}
+
+export async function fetchAndSyncServerLogo(): Promise<string | null> {
+  const logos = await fetchAndSyncServerLogos();
+  return logos?.headerLogo || null;
 }

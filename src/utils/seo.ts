@@ -71,10 +71,10 @@ export function applyClientSeo(seo: Partial<PageSeoData>) {
   setMetaTag('meta[name="twitter:image"]', 'content', ogImage, { tag: 'meta', attrName: 'name', attrVal: 'twitter:image' });
 
   // GEO Tags (Geotargeting)
-  const geoRegion = seo.geoRegion || 'BR-RS';
-  const geoPlacename = seo.geoPlacename || 'Canoas, Rio Grande do Sul, Brasil';
-  const geoPosition = seo.geoPosition || '-29.9189;-51.1794';
-  const icbm = seo.icbm || '-29.9189, -51.1794';
+  const geoRegion = seo.geoRegion || 'BR-SC';
+  const geoPlacename = seo.geoPlacename || 'Florianopolis, Santa Catarina, Brasil';
+  const geoPosition = seo.geoPosition || '-27.5954;-48.5480';
+  const icbm = seo.icbm || '-27.5954, -48.5480';
 
   setMetaTag('meta[name="geo.region"]', 'content', geoRegion, { tag: 'meta', attrName: 'name', attrVal: 'geo.region' });
   setMetaTag('meta[name="geo.placename"]', 'content', geoPlacename, { tag: 'meta', attrName: 'name', attrVal: 'geo.placename' });
@@ -90,8 +90,8 @@ export function applyClientSeo(seo: Partial<PageSeoData>) {
     document.head.appendChild(scriptTag);
   }
 
-  const lat = geoPosition.includes(';') ? geoPosition.split(';')[0].trim() : '-29.9189';
-  const lng = geoPosition.includes(';') ? geoPosition.split(';')[1].trim() : '-51.1794';
+  const lat = geoPosition.includes(';') ? geoPosition.split(';')[0].trim() : '-27.5954';
+  const lng = geoPosition.includes(';') ? geoPosition.split(';')[1].trim() : '-48.5480';
 
   scriptTag.textContent = seo.jsonLdCustom || JSON.stringify({
     '@context': 'https://schema.org',
@@ -101,8 +101,8 @@ export function applyClientSeo(seo: Partial<PageSeoData>) {
     'url': canonicalUrl || 'https://rebeldiafm.com.br',
     'address': {
       '@type': 'PostalAddress',
-      'addressLocality': 'Canoas',
-      'addressRegion': 'RS',
+      'addressLocality': 'Florianopolis',
+      'addressRegion': 'SC',
       'addressCountry': 'BR',
     },
     'geo': {

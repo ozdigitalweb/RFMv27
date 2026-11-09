@@ -63,7 +63,7 @@ import {
   Save,
 } from 'lucide-react';
 import { api, DbScheduleItem, DbShoutout, DbSongRequest, DbStats } from '../utils/api';
-import { ProgramItem, ActiveTab, PromoBanner, ProgramVideoItem, HostAccount } from '../types';
+import { ProgramItem, ActiveTab, PromoBanner, ProgramVideoItem, HostAccount, RadioStationConfig } from '../types';
 import {
   MixcloudRecording,
   resolveMixcloudUserOrQuery,
@@ -87,6 +87,8 @@ interface AdminManagerModalProps {
   onNavigateToTab?: (tab: ActiveTab) => void;
   promoBanners?: PromoBanner[];
   onSavePromoBanners?: (banners: PromoBanner[]) => void;
+  stationConfig?: RadioStationConfig;
+  onSaveStationConfig?: (config: RadioStationConfig) => void;
 }
 
 const DEFAULT_ADMIN_USER = 'admin@rebeldiafm.com';
@@ -244,10 +246,32 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
   onNavigateToTab,
   promoBanners = INITIAL_PROMO_BANNERS,
   onSavePromoBanners,
+  stationConfig,
+  onSaveStationConfig,
 }) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     return Boolean(localStorage.getItem('rebeldia_admin_session'));
   });
+
+  const [metadataDelaySeconds, setMetadataDelaySeconds] = useState<number>(() => {
+    if (stationConfig?.metadataDelaySeconds !== undefined) {
+      return stationConfig.metadataDelaySeconds;
+    }
+    try {
+      const saved = localStorage.getItem('rebeldia_station_config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.metadataDelaySeconds !== undefined) return Number(parsed.metadataDelaySeconds);
+      }
+    } catch {}
+    return 10;
+  });
+
+  useEffect(() => {
+    if (stationConfig?.metadataDelaySeconds !== undefined) {
+      setMetadataDelaySeconds(stationConfig.metadataDelaySeconds);
+    }
+  }, [stationConfig?.metadataDelaySeconds]);
 
   // Auth Form State
   const [username, setUsername] = useState('');
@@ -1421,8 +1445,30 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
     try {
       saveInstitutionalData(institutionalForm);
       await api.saveInstitutionalData(institutionalForm);
-      showToast('Dados institucionais da REBELDIA salvos no banco de dados!');
+
+      // Salva retardo no stationConfig
+      if (onSaveStationConfig && stationConfig) {
+        onSaveStationConfig({
+          ...stationConfig,
+          metadataDelaySeconds,
+        });
+      } else {
+        await api.saveStationConfig({ metadataDelaySeconds });
+        try {
+          const saved = localStorage.getItem('rebeldia_station_config');
+          const parsed = saved ? JSON.parse(saved) : {};
+          parsed.metadataDelaySeconds = metadataDelaySeconds;
+          localStorage.setItem('rebeldia_station_config', JSON.stringify(parsed));
+        } catch {}
+      }
+
+      showToast('Dados institucionais e retardo de sincronia salvos!');
       onRefreshData?.();
+
+      // Fechar a guia/modal automaticamente após salvar
+      setTimeout(() => {
+        onClose();
+      }, 500);
     } catch (err) {
       showToast('Erro ao salvar dados institucionais');
     } finally {
@@ -5320,6 +5366,62 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
 
                   {/* 0. UPLOAD E GESTÃO DO LOGOTIPO */}
                   <LogoUploader />
+
+                  {/* SINCRONIA DA FAIXA & RETARDO DO TÍTULO (REGRA FIXA NO PLAYER) */}
+                  <div className="p-5 rounded-2xl bg-zinc-950 border border-zinc-800 space-y-3 shadow-lg">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-amber-400" />
+                        Sincronia da Faixa & Retardo do Título
+                      </h4>
+                      <span className="px-2.5 py-1 rounded-full bg-amber-400/10 border border-amber-400/30 text-amber-400 text-xs font-mono font-bold">
+                        {metadataDelaySeconds === 0 ? '0s (Sem retardo)' : `${metadataDelaySeconds}s de retardo`}
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-zinc-400 leading-relaxed">
+                      Compensa o buffer de transmissão do streaming na web. Como a transmissão pela internet leva cerca de 10 segundos para chegar ao reprodutor, o retardo garante que o nome da música e a capa entrem em sincronia exata no momento em que o áudio começa a tocar nos alto-falantes.
+                    </p>
+
+                    <div className="space-y-2.5 pt-1">
+                      <div className="flex items-center gap-3">
+                        <span className="text-[10px] text-zinc-500 font-mono">0s</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={30}
+                          step={1}
+                          value={metadataDelaySeconds}
+                          onChange={(e) => setMetadataDelaySeconds(Number(e.target.value))}
+                          className="flex-1 accent-amber-400 h-1.5 bg-zinc-800 rounded-lg cursor-pointer"
+                        />
+                        <span className="text-[10px] text-zinc-500 font-mono">30s</span>
+                      </div>
+
+                      {/* Presets Rápidos */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                        {[
+                          { sec: 0, label: '0s (Direto)' },
+                          { sec: 5, label: '5s' },
+                          { sec: 10, label: '10s (Recomendado)' },
+                          { sec: 15, label: '15s' },
+                        ].map((p) => (
+                          <button
+                            key={p.sec}
+                            type="button"
+                            onClick={() => setMetadataDelaySeconds(p.sec)}
+                            className={`py-1.5 px-2 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                              metadataDelaySeconds === p.sec
+                                ? 'bg-amber-400 text-black border-amber-400 shadow-sm'
+                                : 'bg-zinc-800/80 hover:bg-zinc-800 border-white/10 text-zinc-300'
+                            }`}
+                          >
+                            <div className="truncate">{p.label}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
 
                   {/* 1. DADOS DE IDENTIDADE BÁSICA */}
                   <div className="p-5 rounded-2xl bg-zinc-950 border border-zinc-800 space-y-4">

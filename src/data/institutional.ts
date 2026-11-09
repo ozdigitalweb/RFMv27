@@ -113,8 +113,8 @@ export const DEFAULT_INSTITUTIONAL_DATA: InstitutionalData = {
   bandsEmail: 'radio@rebeldiafm.com.br',
   whatsapp: '+55 (48) 99198-4678',
   instagram: '@rebeldiafm',
-  location: 'Canoas - RS, Brasil • Transmissão Global Web & App',
-  studioAddress: 'Estúdio Central Rebeldia • Canoas - RS, Brasil',
+  location: 'Florianopolis / SC, Brasil • Transmissão Global Web & App',
+  studioAddress: 'Estúdio Central Rebeldia • Florianopolis / SC, Brasil',
   licenseInfo: 'Emissora Digital Independente Sob Princípios de Rádio Livre e Licença Creative Commons de Conteúdo Próprio.',
   transmissionTech: {
     bitrate: '128 kbps HD',
