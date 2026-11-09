@@ -207,7 +207,7 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
       setEditMixcloudUrl(program.mixcloudUrl || '');
       setEditPhotoGallery(program.photoGallery || []);
       setEditVideoGallery(
-        ((program.videoGallery || []) as any[]).map((item, idx) =>
+              (program.videoGallery || []).map((item, idx) =>
           typeof item === 'string'
             ? { id: String(idx), url: item, title: `Vídeo #${idx + 1}` }
             : { id: item.id || String(idx), url: item.url, title: item.title || `Vídeo #${idx + 1}` }

@@ -119,9 +119,10 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
       } else {
         setLoginError(res.error || 'Credenciais inválidas');
       }
-    } catch (err: any) {
-      setLoginError(err.message || 'Erro ao conectar com o servidor');
-    } finally {
+    } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Erro ao conectar com o servidor';
+          setLoginError(message);
+        } finally {
       setLoginLoading(false);
     }
   };
@@ -178,9 +179,10 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
       } else {
         setRegError(res.error || 'Erro ao cadastrar locutor');
       }
-    } catch (err: any) {
-      setRegError(err.message || 'Erro ao cadastrar');
-    } finally {
+    } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Erro ao cadastrar';
+          setRegError(message);
+        } finally {
       setRegLoading(false);
     }
   };
@@ -205,9 +207,10 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
       } else {
         setRecoverError(res.error || 'Nenhum locutor encontrado com estes dados');
       }
-    } catch (err: any) {
-      setRecoverError(err.message || 'Erro ao buscar dados');
-    } finally {
+    } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Erro ao buscar dados';
+          setRecoverError(message);
+        } finally {
       setRecoverLoading(false);
     }
   };
@@ -254,9 +257,10 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
       } else {
         setRecoverError(res.error || 'Resposta incorreta ou erro ao redefinir');
       }
-    } catch (err: any) {
-      setRecoverError(err.message || 'Erro ao redefinir senha');
-    } finally {
+    } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Erro ao redefinir senha';
+          setRecoverError(message);
+        } finally {
       setRecoverLoading(false);
     }
   };

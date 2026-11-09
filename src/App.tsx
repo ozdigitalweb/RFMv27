@@ -26,6 +26,12 @@ import {
   Maximize2,
 } from 'lucide-react';
 import { radioAudio, normalizeStreamUrl, DEMO_TRACKS, DemoTrack } from './utils/audioEngine';
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
 import {
   DEFAULT_RADIO_CONFIG,
   INITIAL_PROGRAMS,
@@ -406,7 +412,7 @@ export default function App() {
   };
 
   // PWA Install prompt state
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+    const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isAppInstalled, setIsAppInstalled] = useState(false);
 
   // Host Accounts (Cadastro de Locutores) State
@@ -914,7 +920,7 @@ export default function App() {
     }
 
     // PWA Install detection
-    const handleBeforeInstallPrompt = (e: any) => {
+        const handleBeforeInstallPrompt = (e: BeforeInstallPromptEvent) => {
       e.preventDefault();
       setDeferredPrompt(e);
     };

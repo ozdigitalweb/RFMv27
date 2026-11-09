@@ -415,7 +415,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
           message: 'Nenhuma gravação recente encontrada para este canal ou usuário.',
         };
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       return {
         success: false,
         message: 'Erro ao consultar o Mixcloud. Verifique o usuário ou link.',
@@ -666,9 +666,10 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
 
       showToast(`Perfil do locutor ${updated.name} salvo com sucesso!`);
       setEditingHostAccount(null);
-    } catch (err: any) {
-      showToast(err.message || 'Erro ao salvar locutor');
-    } finally {
+    } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Erro ao salvar locutor';
+          showToast(message);
+        } finally {
       setIsSavingHost(false);
     }
   };
@@ -743,9 +744,10 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
         securityAnswer: '',
         status: 'active',
       });
-    } catch (err: any) {
-      showToast(err.message || 'Erro ao cadastrar locutor');
-    } finally {
+    } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Erro ao cadastrar locutor';
+          showToast(message);
+        } finally {
       setIsSavingHost(false);
     }
   };
@@ -807,9 +809,10 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
         setIsAuthenticated(true);
         showToast('Autenticado com sucesso no painel!');
       }
-    } catch (err: any) {
-      setLoginError(err.message || 'Usuário ou senha incorretos');
-    } finally {
+    } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Usuário ou senha incorretos';
+          setLoginError(message);
+        } finally {
       setIsLoadingAuth(false);
     }
   };
@@ -1047,7 +1050,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
         showToast('Programa e Hotsite atualizados com sucesso!');
         setEditingProgram((prev) => (prev ? { ...prev, ...payload } : null));
       } else {
-        const created = await api.createScheduleItem(payload as any);
+        const created = await api.createScheduleItem(payload);
         showToast('Novo programa e Hotsite publicados no ar!');
         if (created && created.id) {
           setEditingProgram((prev) => (prev ? { ...prev, id: created.id, ...payload } : null));
@@ -1056,9 +1059,10 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
 
       await loadSchedule();
       onRefreshData?.();
-    } catch (err: any) {
-      showToast(err.message || 'Erro ao salvar programa');
-    } finally {
+    } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Erro ao salvar programa';
+          showToast(message);
+        } finally {
       setIsSavingProgram(false);
     }
   };
@@ -1082,13 +1086,14 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
           : `Programa "${prog.title}" desativado (fora do ar).`
       );
       onRefreshData?.();
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Reverte em caso de erro
       setScheduleList((prev) =>
         prev.map((item) => (item.id === prog.id ? { ...item, isActive: currentActive } : item))
       );
-      showToast(err.message || 'Erro ao alternar status do programa');
-    } finally {
+          const message = err instanceof Error ? err.message : 'Erro ao alternar status do programa';
+          showToast(message);
+        } finally {
       setTogglingProgId(null);
     }
   };
@@ -1332,9 +1337,10 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
           }
           await loadSchedule();
           onRefreshData?.();
-        } catch (err: any) {
-          showToast(err.message || 'Erro ao excluir programa');
-        }
+        } catch (err: unknown) {
+                  const message = err instanceof Error ? err.message : 'Erro ao excluir programa';
+                  showToast(message);
+                }
       },
     });
   };
@@ -1348,9 +1354,10 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
       );
       showToast(currentApproved ? 'Recado ocultado do mural' : 'Recado aprovado para o ar!');
       onRefreshData?.();
-    } catch (err: any) {
-      showToast('Erro ao atualizar moderação');
-    }
+    } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Erro ao atualizar moderação';
+          showToast(message);
+        }
   };
 
   const promptDeleteShoutout = (id: number, author: string) => {
@@ -1365,9 +1372,10 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
           setShoutoutsList((prev) => prev.filter((s) => s.id !== id));
           showToast('Recado excluído do banco');
           onRefreshData?.();
-        } catch (err: any) {
-          showToast('Erro ao excluir recado');
-        }
+        } catch (err: unknown) {
+                  const message = err instanceof Error ? err.message : 'Erro ao excluir recado';
+                  showToast(message);
+                }
       },
     });
   };
@@ -1381,9 +1389,10 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
       );
       showToast(`Status do pedido atualizado: ${newStatus.toUpperCase()}`);
       onRefreshData?.();
-    } catch (err: any) {
-      showToast('Erro ao atualizar status do pedido');
-    }
+    } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Erro ao atualizar status do pedido';
+          showToast(message);
+        }
   };
 
   const promptDeleteSongRequest = (id: number, songTitle: string) => {
@@ -1398,9 +1407,10 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
           setRequestsList((prev) => prev.filter((r) => r.id !== id));
           showToast('Pedido musical excluído');
           onRefreshData?.();
-        } catch (err: any) {
-          showToast('Erro ao excluir pedido');
-        }
+        } catch (err: unknown) {
+                  const message = err instanceof Error ? err.message : 'Erro ao excluir pedido';
+                  showToast(message);
+                }
       },
     });
   };

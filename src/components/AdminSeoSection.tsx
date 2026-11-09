@@ -92,7 +92,7 @@ export const AdminSeoSection: React.FC = () => {
   }, [selectedPath]);
 
   // Handle Form Change
-  const handleChange = (field: keyof PageSeoData, value: any) => {
+    const handleChange = (field: keyof PageSeoData, value: string) => {
     setFormState((prev) => ({
       ...prev,
       [field]: value,
@@ -152,9 +152,10 @@ export const AdminSeoSection: React.FC = () => {
       } else {
         setErrorMessage(res.error || 'Erro ao salvar configurações de SEO.');
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Erro inesperado.');
-    } finally {
+    } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Erro inesperado.';
+          setErrorMessage(message);
+        } finally {
       setIsSaving(false);
     }
   };

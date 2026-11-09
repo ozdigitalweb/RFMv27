@@ -3,11 +3,13 @@ import { Sparkles, Radio, Smartphone, Music2, Calendar, Sliders, Clock, Bell, Sh
 import { APP_FEATURES_PROPOSAL } from '../data/initialData';
 import { downloadBrandManifestoFile } from '../utils/downloadManifesto';
 
+type TabName = 'player' | 'requests' | 'schedule' | 'mural' | 'features' | 'rebeldia';
+
 interface FeaturesSuggestionModalProps {
-  onNavigateTab: (tab: any) => void;
+  onNavigateTab: (tab: TabName) => void;
 }
 
-const ICON_MAP: Record<string, any> = {
+const ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   Radio,
   Smartphone,
   Music2,

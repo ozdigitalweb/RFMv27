@@ -122,9 +122,10 @@ export const AdminBannersSection: React.FC<AdminBannersSectionProps> = ({
       const dataUrl = await processImageFile(file, 1200, 0.85);
       setFormBannerUrl(dataUrl);
       showToast('Imagem do banner carregada e otimizada com sucesso!');
-    } catch (err: any) {
-      showToast(err?.message || 'Erro ao processar imagem.');
-    } finally {
+    } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Erro ao processar imagem.';
+          showToast(message);
+        } finally {
       setIsUploading(false);
     }
   };

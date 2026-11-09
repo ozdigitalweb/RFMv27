@@ -13,10 +13,15 @@ import { RebeldiaLogo } from './RebeldiaLogo';
 import { AndroidIcon } from './AndroidIcon';
 import { AppleIcon } from './AppleIcon';
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
 interface InstallModalProps {
   isOpen: boolean;
   onClose: () => void;
-  deferredPrompt: any;
+  deferredPrompt: BeforeInstallPromptEvent | null;
   onInstallClick: () => void;
   isInstalled: boolean;
   initialPlatform?: 'android' | 'ios';

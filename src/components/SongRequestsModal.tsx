@@ -96,8 +96,8 @@ export const SongRequestsModal: React.FC<SongRequestsModalProps> = ({
 
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const audioPreviewRef = useRef<HTMLAudioElement | null>(null);
-  const debounceTimerRef = useRef<any>(null);
-  const previewTimerRef = useRef<any>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playDurationTarget = 90; // 1 min 30 seconds (90s)
 
   // Auto-enrich requests from database that might be missing previewUrl or artworkUrl

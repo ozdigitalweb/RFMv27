@@ -168,7 +168,29 @@ export async function fetchMixcloudRecordings(
   limit: number = 5
 ): Promise<{ recordings: MixcloudRecording[]; sourceInfo: string }> {
   try {
-    let rawItems: any[] = [];
+    interface MixcloudRawItem {
+      key: string;
+      url: string;
+      name: string;
+      created_time: string;
+      play_count: number;
+      favorite_count: number;
+      audio_length: number;
+      pictures?: {
+        large?: string;
+        extra_large?: string;
+        medium?: string;
+        thumbnail?: string;
+      };
+      user?: {
+        name: string;
+        username: string;
+        url: string;
+      };
+      tags?: Array<{ name?: string } | string>;
+    }
+
+    let rawItems: MixcloudRawItem[] = [];
     let sourceInfo = '';
 
     const resolvedTarget: { user?: string; query?: string } =
@@ -272,7 +294,7 @@ export async function fetchMixcloudRecordings(
         'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=600&auto=format&fit=crop&q=80';
 
       const tags = Array.isArray(item.tags)
-        ? item.tags.map((t: any) => (typeof t === 'string' ? t : t.name)).filter(Boolean)
+            ? item.tags.map((t: { name?: string } | string) => (typeof t === 'string' ? t : t.name)).filter(Boolean)
         : [];
 
       return {
