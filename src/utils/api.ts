@@ -489,54 +489,54 @@ export const api = {
     }));
   },
 
-  async registerHost(accountData: any): Promise<{ success: boolean; host?: any; error?: string }> {
+  async registerHost(accountData: any, recaptchaToken?: string): Promise<{ success: boolean; host?: any; error?: string }> {
     try {
       const res = await fetch('/api/host-accounts/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(accountData),
+          body: JSON.stringify({ ...accountData, recaptchaToken }),
       });
       const data = await res.json();
       if (!res.ok) {
         return { success: false, error: data.error || 'Erro ao cadastrar locutor' };
       }
       return { success: true, host: data.host };
-    } catch (err: any) {
-      return { success: false, error: err.message || 'Erro de conexão com o servidor' };
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : 'Erro de conexão com o servidor' };
     }
   },
 
-  async loginHost(identifier: string, password: string, programId?: string): Promise<{ success: boolean; host?: any; error?: string }> {
+    async loginHost(identifier: string, password: string, programId?: string, recaptchaToken?: string): Promise<{ success: boolean; host?: any; error?: string }> {
     try {
       const res = await fetch('/api/host-accounts/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier, password, programId }),
+          body: JSON.stringify({ identifier, password, programId, recaptchaToken }),
       });
       const data = await res.json();
       if (!res.ok) {
         return { success: false, error: data.error || 'Identificador ou senha inválidos' };
       }
       return { success: true, host: data.host };
-    } catch (err: any) {
-      return { success: false, error: err.message || 'Erro de conexão com o servidor' };
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : 'Erro de conexão com o servidor' };
     }
   },
 
-  async recoverHostPassword(data: { identifier: string; securityAnswer?: string; newPassword?: string }): Promise<{ success: boolean; securityQuestion?: string; message?: string; error?: string; name?: string; username?: string }> {
+    async recoverHostPassword(data: { identifier: string; securityAnswer?: string; newPassword?: string }, recaptchaToken?: string): Promise<{ success: boolean; securityQuestion?: string; message?: string; error?: string; name?: string; username?: string }> {
     try {
       const res = await fetch('/api/host-accounts/recover-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+          body: JSON.stringify({ ...data, recaptchaToken }),
       });
       const result = await res.json();
       if (!res.ok) {
         return { success: false, error: result.error || 'Erro ao recuperar senha' };
       }
       return { success: true, ...result };
-    } catch (err: any) {
-      return { success: false, error: err.message || 'Erro de conexão com o servidor' };
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : 'Erro de conexão com o servidor' };
     }
   },
 

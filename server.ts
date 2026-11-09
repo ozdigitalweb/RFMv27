@@ -78,7 +78,30 @@ async function startServer() {
   // --- ADMIN AUTH STATE & MIDDLEWARE (Norma 8.4) ---
   const ADMIN_USER = process.env.ADMIN_USER || 'admin@rebeldiafm.com';
   const ADMIN_PASS = process.env.ADMIN_PASSWORD || 'rebeldia2026';
-  const activeAdminTokens = new Set<string>();
+    const RECAPTCHA_SECRET_KEY = process.env.RECAPTCHA_SECRET_KEY || '';
+    const activeAdminTokens = new Set<string>();
+
+    // Helper to verify reCAPTCHA v3 token
+    const verifyRecaptcha = async (token: string, action: string): Promise<{ success: boolean; score?: number; error?: string }> => {
+      if (!RECAPTCHA_SECRET_KEY || !token) {
+        return { success: false, error: 'reCAPTCHA não configurado ou token ausente' };
+      }
+      try {
+        const res = await fetch(`https://www.google.com/recaptcha/api/siteverify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ secret: RECAPTCHA_SECRET_KEY, response: token }),
+        });
+        const data = await res.json();
+        // For v3, we check score >= 0.5 and action matches
+        if (data.success && data.score !== undefined && data.score >= 0.5 && data.action === action) {
+          return { success: true, score: data.score };
+        }
+        return { success: false, error: data['error-codes']?.join(', ') || 'reCAPTCHA inválido', score: data.score };
+      } catch (err) {
+        return { success: false, error: 'Erro ao verificar reCAPTCHA' };
+      }
+    };
 
   const requireAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const authHeader = req.headers.authorization;
@@ -935,7 +958,14 @@ async function startServer() {
 
   app.post('/api/host-accounts/register', async (req, res) => {
     try {
-      const { name, username, email, password, whatsapp, bio, avatarUrl, role, programId, programTitle, programIds, isMascot, securityQuestion, securityAnswer } = req.body;
+        // Verify reCAPTCHA
+        const recaptchaToken = req.body.recaptchaToken;
+        const recaptchaResult = await verifyRecaptcha(recaptchaToken, 'register');
+        if (!recaptchaResult.success) {
+          return res.status(400).json({ error: 'Falha na verificação reCAPTCHA. Tente novamente.' });
+        }
+
+        const { name, username, email, password, whatsapp, bio, avatarUrl, role, programId, programTitle, programIds, isMascot, securityQuestion, securityAnswer } = req.body;
 
       if (!name || !username || !email || !password) {
         return res.status(400).json({ error: 'Nome, usuário, e-mail e senha são obrigatórios' });
@@ -1028,7 +1058,14 @@ async function startServer() {
 
   app.post('/api/host-accounts/login', async (req, res) => {
     try {
-      const { identifier, password } = req.body;
+        // Verify reCAPTCHA
+        const recaptchaToken = req.body.recaptchaToken;
+        const recaptchaResult = await verifyRecaptcha(recaptchaToken, 'login');
+        if (!recaptchaResult.success) {
+          return res.status(400).json({ error: 'Falha na verificação reCAPTCHA. Tente novamente.' });
+        }
+
+        const { identifier, password } = req.body;
 
       if (!identifier || !password) {
         return res.status(400).json({ error: 'Identificador (usuário ou e-mail) e senha são obrigatórios' });
@@ -1094,13 +1131,19 @@ async function startServer() {
 
   app.post('/api/host-accounts/recover-password', async (req, res) => {
     try {
-      const { identifier, securityAnswer, newPassword } = req.body;
+        // Verify reCAPTCHA (only when submitting new password, not when fetching question)
+        const recaptchaToken = req.body.recaptchaToken;
+        const newPassword = req.body.newPassword;
+      
+        if (newPassword && recaptchaToken) {
+          const recaptchaResult = await verifyRecaptcha(recaptchaToken, 'recover');
+          if (!recaptchaResult.success) {
+            return res.status(400).json({ error: 'Falha na verificação reCAPTCHA. Tente novamente.' });
+          }
+        }
 
-      if (!identifier) {
-        return res.status(400).json({ error: 'Informe seu e-mail ou nome de usuário' });
-      }
-
-      const cleanId = String(identifier).toLowerCase().trim();
+        const { identifier, securityAnswer, newPassword: newPass } = req.body;
+        const cleanId = String(identifier).toLowerCase().trim();
 
       const [row] = await db
         .select()

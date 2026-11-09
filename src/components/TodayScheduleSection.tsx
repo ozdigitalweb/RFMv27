@@ -133,10 +133,10 @@ export const TodayScheduleSection: React.FC<TodayScheduleSectionProps> = ({
     mainList.sort((a, b) => {
       const aIsLive =
         (currentLiveProgram && currentLiveProgram.id === a.id) ||
-        (liveTakeover && liveTakeover.programId === a.id);
+              (liveTakeover && liveTakeover.targetProgramId === a.id);
       const bIsLive =
         (currentLiveProgram && currentLiveProgram.id === b.id) ||
-        (liveTakeover && liveTakeover.programId === b.id);
+              (liveTakeover && liveTakeover.targetProgramId === b.id);
 
       if (aIsLive && !bIsLive) return -1;
       if (!aIsLive && bIsLive) return 1;
@@ -160,7 +160,7 @@ export const TodayScheduleSection: React.FC<TodayScheduleSectionProps> = ({
   const renderProgramCard = (prog: ProgramItem, isRepriseSlot: boolean, index: number = 0) => {
     const isLiveNow =
       (currentLiveProgram && currentLiveProgram.id === prog.id) ||
-      (liveTakeover && liveTakeover.programId === prog.id);
+          (liveTakeover && liveTakeover.targetProgramId === prog.id);
 
     const hasReminder = reminders.includes(prog.id);
 

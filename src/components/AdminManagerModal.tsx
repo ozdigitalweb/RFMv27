@@ -3852,7 +3852,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                                         />
                                         <div className="min-w-0 flex-1">
                                           <p className="text-[11px] font-bold text-white truncate">{rec.name}</p>
-                                          <p className="text-[9px] font-mono text-zinc-400">{rec.user_name}</p>
+                                          <p className="text-[9px] font-mono text-zinc-400">@{rec.user?.username || rec.username || 'mixcloud'}</p>
                                         </div>
                                       </div>
                                     ))}

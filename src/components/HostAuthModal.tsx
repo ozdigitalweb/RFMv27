@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   User,
   Lock,
@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { HostAccount, ProgramItem, RadioStationConfig, LiveTakeover } from '../types';
 import { api } from '../utils/api';
+import { GoogleReCaptchaProvider, GoogleReCaptcha, useGoogleReCaptcha } from 'react-google-recaptcha-v3';
 
 interface HostAuthModalProps {
   isOpen: boolean;
@@ -98,9 +99,29 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
   const [recoverSuccess, setRecoverSuccess] = useState('');
   const [recoverLoading, setRecoverLoading] = useState(false);
 
+    // reCAPTCHA state
+    const { executeRecaptcha: executeRecaptchaHook } = useGoogleReCaptcha();
+    const [recaptchaToken, setRecaptchaToken] = useState<string | null>(null);
+    const [recaptchaError, setRecaptchaError] = useState('');
+
+    const executeRecaptcha = async (action: string) => {
+      try {
+        const token = await executeRecaptchaHook(action);
+        setRecaptchaToken(token);
+        setRecaptchaError('');
+        return token;
+      } catch (err) {
+        setRecaptchaError('Erro ao validar reCAPTCHA. Tente novamente.');
+        return null;
+      }
+    };
+
   if (!isOpen) return null;
 
-  const handleLoginSubmit = async (e: React.FormEvent) => {
+    // Get reCAPTCHA site key from environment (Vite injects VITE_ vars at build time)
+    const RECAPTCHA_SITE_KEY = (import.meta as any).env?.VITE_RECAPTCHA_SITE_KEY || '';
+
+    const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
     if (!loginIdentifier.trim() || !loginPassword) {
@@ -108,24 +129,31 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
       return;
     }
 
-    setLoginLoading(true);
-    try {
-      const res = await api.loginHost(loginIdentifier.trim(), loginPassword);
-      if (res.success && res.host) {
-        onHostLogin(res.host);
-        setActiveTab('profile');
-        setLoginPassword('');
-        setLoginError('');
-      } else {
-        setLoginError(res.error || 'Credenciais inválidas');
+      // Execute reCAPTCHA before login
+      const token = await executeRecaptcha('login');
+      if (!token) {
+        setLoginError(recaptchaError || 'Erro na verificação de segurança. Tente novamente.');
+        return;
       }
-    } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : 'Erro ao conectar com o servidor';
-          setLoginError(message);
-        } finally {
-      setLoginLoading(false);
-    }
-  };
+
+      setLoginLoading(true);
+      try {
+        const res = await api.loginHost(loginIdentifier.trim(), loginPassword, undefined, token);
+        if (res.success && res.host) {
+          onHostLogin(res.host);
+          setActiveTab('profile');
+          setLoginPassword('');
+          setLoginError('');
+        } else {
+          setLoginError(res.error || 'Credenciais inválidas');
+        }
+      } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Erro ao conectar com o servidor';
+            setLoginError(message);
+          } finally {
+        setLoginLoading(false);
+      }
+    };
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -152,31 +180,38 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
       return;
     }
 
-    setRegLoading(true);
-    try {
-      const targetProg = programs.find((p) => regProgramIds.includes(String(p.id)));
-      const res = await api.registerHost({
-        name: regName.trim(),
-        username: regUsername.trim(),
-        email: regEmail.trim(),
-        password: regPassword,
-        whatsapp: regWhatsapp.trim() || '5548991984678',
-        role: regRole.trim(),
-        programIds: regProgramIds,
-        programId: regProgramIds[0] || undefined,
-        programTitle: targetProg?.title || undefined,
-        securityQuestion: regSecurityQuestion,
-        securityAnswer: regSecurityAnswer.trim(),
-      });
+      // Execute reCAPTCHA before register
+      const token = await executeRecaptcha('register');
+      if (!token) {
+        setRegError(recaptchaError || 'Erro na verificação de segurança. Tente novamente.');
+        return;
+      }
 
-      if (res.success && res.host) {
-        setRegSuccess('Cadastro realizado com sucesso! Você já está autenticado.');
-        onHostLogin(res.host);
-        setTimeout(() => {
-          setActiveTab('profile');
-          setRegSuccess('');
-        }, 1200);
-      } else {
+      setRegLoading(true);
+      try {
+        const targetProg = programs.find((p) => regProgramIds.includes(String(p.id)));
+        const res = await api.registerHost({
+          name: regName.trim(),
+          username: regUsername.trim(),
+          email: regEmail.trim(),
+          password: regPassword,
+          whatsapp: regWhatsapp.trim() || '5548991984678',
+          role: regRole.trim(),
+          programIds: regProgramIds,
+          programId: regProgramIds[0] || undefined,
+          programTitle: targetProg?.title || undefined,
+          securityQuestion: regSecurityQuestion,
+          securityAnswer: regSecurityAnswer.trim(),
+        }, token);
+
+        if (res.success && res.host) {
+          setRegSuccess('Cadastro realizado com sucesso! Você já está autenticado.');
+          onHostLogin(res.host);
+          setTimeout(() => {
+            setActiveTab('profile');
+            setRegSuccess('');
+          }, 1200);
+        } else {
         setRegError(res.error || 'Erro ao cadastrar locutor');
       }
     } catch (err: unknown) {
@@ -235,35 +270,42 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
       return;
     }
 
-    setRecoverLoading(true);
-    try {
-      const res = await api.recoverHostPassword({
-        identifier: recoverIdentifier.trim(),
-        securityAnswer: recoverAnswer.trim(),
-        newPassword: recoverNewPassword,
-      });
-
-      if (res.success) {
-        setRecoverSuccess('Senha redefinida com sucesso! Redirecionando para login...');
-        setTimeout(() => {
-          setRecoverStep(1);
-          setRecoverIdentifier('');
-          setRecoverAnswer('');
-          setRecoverNewPassword('');
-          setRecoverConfirmPassword('');
-          setRecoverSuccess('');
-          setActiveTab('login');
-        }, 1800);
-      } else {
-        setRecoverError(res.error || 'Resposta incorreta ou erro ao redefinir');
+      // Execute reCAPTCHA before recover password
+      const token = await executeRecaptcha('recover');
+      if (!token) {
+        setRecoverError(recaptchaError || 'Erro na verificação de segurança. Tente novamente.');
+        return;
       }
-    } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : 'Erro ao redefinir senha';
-          setRecoverError(message);
-        } finally {
-      setRecoverLoading(false);
-    }
-  };
+
+      setRecoverLoading(true);
+      try {
+        const res = await api.recoverHostPassword({
+          identifier: recoverIdentifier.trim(),
+          securityAnswer: recoverAnswer.trim(),
+          newPassword: recoverNewPassword,
+        }, token);
+
+        if (res.success) {
+          setRecoverSuccess('Senha redefinida com sucesso! Redirecionando para login...');
+          setTimeout(() => {
+            setRecoverStep(1);
+            setRecoverIdentifier('');
+            setRecoverAnswer('');
+            setRecoverNewPassword('');
+            setRecoverConfirmPassword('');
+            setRecoverSuccess('');
+            setActiveTab('login');
+          }, 1800);
+        } else {
+          setRecoverError(res.error || 'Resposta incorreta ou erro ao redefinir');
+        }
+      } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Erro ao redefinir senha';
+            setRecoverError(message);
+          } finally {
+        setRecoverLoading(false);
+      }
+    };
 
   // Find all programs associated with current host
   const hostProgramIds = currentLoggedInHost?.programIds && currentLoggedInHost.programIds.length > 0
@@ -283,8 +325,9 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
   const primaryLinkedProgram = linkedPrograms[0] || null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-[10px] sm:p-[30px] bg-black/80 backdrop-blur-md animate-fadeIn">
-      <div className="mono-card border border-white/20 rounded-2xl w-full max-w-xl max-h-[calc(100vh-20px)] sm:max-h-[calc(100vh-60px)] flex flex-col overflow-hidden shadow-2xl bg-zinc-950">
+      <GoogleReCaptchaProvider reCaptchaKey={RECAPTCHA_SITE_KEY}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-[10px] sm:p-[30px] bg-black/80 backdrop-blur-md animate-fadeIn">
+          <div className="mono-card border border-white/20 rounded-2xl w-full max-w-xl max-h-[calc(100vh-20px)] sm:max-h-[calc(100vh-60px)] flex flex-col overflow-hidden shadow-2xl bg-zinc-950">
         {/* Header */}
         <div className="p-6 border-b border-white/10 flex items-center justify-between bg-zinc-900/60">
           <div className="flex items-center gap-3">
@@ -428,7 +471,7 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
 
                 <p className="text-xs text-zinc-300 leading-relaxed">
                   {liveTakeover?.isActive
-                    ? `Você está no ar com "${liveTakeover.programTitle}" (${liveTakeover.hostName}). Clique abaixo para gerenciar ou encerrar sua transmissão.`
+                    ? `Você está no ar com "${liveTakeover.originProgramTitle}" (${liveTakeover.substituteHost}). Clique abaixo para gerenciar ou encerrar sua transmissão.`
                     : `Deseja abrir o microfone, transmitir ao vivo ou cobrir o horário de um colega locutor? Clique no botão abaixo para entrar no ar imediatamente.`}
                 </p>
 
@@ -1051,5 +1094,6 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
         </div>
       </div>
     </div>
-  );
+          </GoogleReCaptchaProvider>
+        );
 };
