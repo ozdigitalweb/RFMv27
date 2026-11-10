@@ -1,67 +1,39 @@
 #!/bin/bash
-# Deploy script for Rebeldia FM to VPS
-# Usage: ./deploy.sh
+# Deploy script for Rebeldia FM to VPS via SSH
+# Uses pre-built image from GHCR (built by GitHub Actions on push to producao)
+# Usage: ./deploy.sh [producao|latest]
 
 set -e
 
 # Configuration
 VPS_HOST="root@vps-16147841.oz.com.br"
 VPS_PATH="/home/rebeldiafm"
-PROJECT_NAME="rebeldiafm"
+IMAGE_TAG="${1:-producao}"
+APP_IMAGE="ghcr.io/ozdigitalweb/rfmv27:${IMAGE_TAG}"
 
 echo "=========================================="
-echo "Deploying Rebeldia FM to VPS"
+echo "Deploying Rebeldia FM to VPS via SSH"
 echo "=========================================="
 echo "Host: $VPS_HOST"
 echo "Path: $VPS_PATH"
+echo "Image: $APP_IMAGE"
 echo ""
 
-# 1. Build the project locally
-echo "📦 Building project locally..."
-npm run build
-
-# 2. Create deployment package
-echo "📦 Creating deployment package..."
-tar -czf deploy-package.tar.gz \
-  --exclude=node_modules \
-  --exclude=.git \
-  --exclude=*.log \
-  --exclude=.env \
-  --exclude=.env.local \
-  --exclude=.env.*.local \
-  --exclude=dist \
-  --exclude=deploy-package.tar.gz \
-  --exclude=deploy.sh \
-  --exclude=*.md \
-  --exclude=*.txt \
-  --exclude=.github \
-  --exclude=.vscode \
-  --exclude=.continue \
-  .
-
-# 3. Copy to VPS
-echo "📤 Copying to VPS..."
-scp deploy-package.tar.gz $VPS_HOST:$VPS_PATH/
-
-# 4. Deploy on VPS
-echo "🚀 Deploying on VPS..."
-ssh $VPS_HOST << 'ENDSSH'
-set -e
-cd /home/rebeldiafm
-
-# Backup current version if exists
-if [ -d "rebeldiafm-current" ]; then
-    echo "📦 Backing up current version..."
-    rm -rf rebeldiafm-backup
-    mv rebeldiafm-current rebeldiafm-backup
+# 1. Verify .env.production exists locally (for reference)
+if [ ! -f ".env.production" ]; then
+    echo "⚠️  .env.production not found locally"
+    echo "   Make sure it exists on VPS at $VPS_PATH/rebeldiafm-current/.env.production"
+    echo ""
 fi
 
-# Extract new version
-echo "📦 Extracting new version..."
-mkdir -p rebeldiafm-current
-tar -xzf deploy-package.tar.gz -C rebeldiafm-current
-rm deploy-package.tar.gz
+# 2. Deploy on VPS via SSH
+echo "🚀 Deploying on VPS..."
+ssh $VPS_HOST << ENDSSH
+set -e
+cd $VPS_PATH
 
+# Create directory if not exists
+mkdir -p rebeldiafm-current
 cd rebeldiafm-current
 
 # Copy production env if exists, otherwise create from example
@@ -69,24 +41,39 @@ if [ -f ".env.production" ]; then
     echo "✅ Using existing .env.production"
 else
     echo "⚠️  Creating .env.production from example..."
-    cp .env.production.example .env.production
+    if [ -f ".env.production.example" ]; then
+        cp .env.production.example .env.production
+    else
+        echo "❌ .env.production.example not found!"
+        exit 1
+    fi
     echo "⚠️  IMPORTANT: Edit .env.production with your actual values!"
 fi
 
-# Install dependencies and build
-echo "📦 Installing dependencies..."
-npm ci --production=false
-
-echo "🔨 Building application..."
-npm run build
+# Pull latest image from GHCR
+echo "📥 Pulling image: $APP_IMAGE"
+docker pull $APP_IMAGE
 
 # Stop and remove old containers
 echo "🛑 Stopping old containers..."
 docker-compose down --remove-orphans || true
 
-# Start new containers
-echo "🚀 Starting new containers..."
-docker-compose up -d --build
+# Update docker-compose.yml to use the GHCR image (if using portainer-stack.yml style)
+# We'll use a temporary docker-compose override
+cat > docker-compose.override.yml << 'EOCOMPOSE'
+version: '3.8'
+
+services:
+  app:
+    image: ${APP_IMAGE:-ghcr.io/ozdigitalweb/rfmv27:producao}
+    build: null
+    environment:
+      - APP_IMAGE=${APP_IMAGE:-ghcr.io/ozdigitalweb/rfmv27:producao}
+EOCOMPOSE
+
+# Start new containers with the pulled image
+echo "🚀 Starting containers with image: $APP_IMAGE"
+APP_IMAGE=$APP_IMAGE docker-compose up -d
 
 # Clean up
 docker system prune -f
@@ -95,18 +82,18 @@ echo "✅ Deploy completed!"
 echo "🌐 Application should be running on port 3000"
 ENDSSH
 
-# 5. Cleanup local package
-rm deploy-package.tar.gz
-
 echo ""
 echo "=========================================="
 echo "✅ Deploy completed successfully!"
 echo "=========================================="
 echo "VPS: $VPS_HOST"
 echo "Path: $VPS_PATH/rebeldiafm-current"
+echo "Image: $APP_IMAGE"
 echo ""
 echo "Next steps:"
 echo "1. Check if .env.production has correct values on VPS"
-echo "2. Configure reverse proxy (nginx/Caddy) to forward to port 3000"
+echo "2. Configure reverse proxy (Apache/cPanel) to forward to port 3000"
 echo "3. Verify SSL is working"
 echo "4. Check logs: ssh $VPS_HOST 'cd $VPS_PATH/rebeldiafm-current && docker-compose logs -f'"
+echo ""
+echo "Usage: ./deploy.sh [producao|latest|sha-...]"
