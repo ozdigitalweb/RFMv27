@@ -243,7 +243,7 @@ export default function App() {
   const [hasError, setHasError] = useState(false);
   const [volume, setVolume] = useState(0.85);
   const [isMuted, setIsMuted] = useState(false);
-  const [equalizerPreset, setEqualizerPreset] = useState<EqualizerPreset>('flat');
+  const [equalizerPreset, setEqualizerPreset] = useState<EqualizerPreset>('rock');
 
   // Stream Metadata State (Live song name & artist)
   const [streamMetadata, setStreamMetadata] = useState<StreamMetadata>({
