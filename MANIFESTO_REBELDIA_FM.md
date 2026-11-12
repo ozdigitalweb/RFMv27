@@ -135,7 +135,7 @@ Aqui estão os tokens CSS padronizados prontos para integração no `:root`:
 
 - **Nome Fantasia**: REBELDIA FM
 - **Slogan**: Rádio Livre • O Som que Incomoda o Sistema
-- **Localização**: Canoas - RS, Brasil • Transmissão Global Web & App
+- **Localização**: Florianópolis / SC, Brasil • Transmissão Global Web & App
 - **E-mail Oficial**: `radio@rebeldiafm.com.br`
 - **WhatsApp do Ouvinte**: `+55 (48) 99198-4678`
 - **Instagram**: `@rebeldiafm`

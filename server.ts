@@ -445,7 +445,7 @@ async function startServer() {
         whatsappNumber: '5548991984678',
         instagramUrl: 'https://instagram.com/rebeldiafm',
         email: 'radio@rebeldiafm.com.br',
-        location: 'Florianopolis / SC, Brasil',
+        location: 'Florianópolis / SC, Brasil',
         frequency: 'Web HD & App',
         logoUrl: '/reb_mascot.jpg',
         customLogo: '/reb_mascot.jpg',
@@ -467,7 +467,10 @@ async function startServer() {
         whatsappNumber: configMap.whatsappNumber || '5548991984678',
         instagramUrl: configMap.instagramUrl || 'https://instagram.com/rebeldiafm',
         email: configMap.email || 'radio@rebeldiafm.com.br',
-        location: configMap.location || 'Florianopolis / SC, Brasil',
+        location:
+          configMap.location && !configMap.location.toLowerCase().includes('canoas')
+            ? configMap.location
+            : 'Florianópolis / SC, Brasil',
         frequency: configMap.frequency || 'Web HD & App',
         logoUrl: configMap.customLogo || configMap.logoUrl || '/reb_mascot.jpg',
         customLogo: configMap.customLogo || '/reb_mascot.jpg',

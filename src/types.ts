@@ -151,6 +151,7 @@ export interface RadioStationConfig {
   codec: string;
   frequency?: string;
   logoUrl?: string; // Logotipo oficial da Emissora
+  customLogo?: string; // Logotipo customizado da Emissora
   metadataDelaySeconds?: number; // Retardo em segundos para sincronizar o título com o buffer de áudio (default: 10s)
 }
 

@@ -113,8 +113,8 @@ export const DEFAULT_INSTITUTIONAL_DATA: InstitutionalData = {
   bandsEmail: 'radio@rebeldiafm.com.br',
   whatsapp: '+55 (48) 99198-4678',
   instagram: '@rebeldiafm',
-  location: 'Florianopolis / SC, Brasil • Transmissão Global Web & App',
-  studioAddress: 'Estúdio Central Rebeldia • Florianopolis / SC, Brasil',
+  location: 'Florianópolis / SC, Brasil • Transmissão Global Web & App',
+  studioAddress: 'Estúdio Central Rebeldia • Florianópolis / SC, Brasil',
   licenseInfo: 'Emissora Digital Independente Sob Princípios de Rádio Livre e Licença Creative Commons de Conteúdo Próprio.',
   transmissionTech: {
     bitrate: '128 kbps HD',
@@ -132,7 +132,20 @@ export function getSavedInstitutionalData(): InstitutionalData {
   try {
     const saved = localStorage.getItem(STORAGE_KEY_INSTITUTIONAL);
     if (saved) {
-      return { ...DEFAULT_INSTITUTIONAL_DATA, ...JSON.parse(saved) };
+      const parsed = JSON.parse(saved);
+      let needsResave = false;
+      if (!parsed.location || parsed.location.toLowerCase().includes('canoas')) {
+        parsed.location = 'Florianópolis / SC, Brasil • Transmissão Global Web & App';
+        needsResave = true;
+      }
+      if (!parsed.studioAddress || parsed.studioAddress.toLowerCase().includes('canoas')) {
+        parsed.studioAddress = 'Estúdio Central Rebeldia • Florianópolis / SC, Brasil';
+        needsResave = true;
+      }
+      if (needsResave) {
+        localStorage.setItem(STORAGE_KEY_INSTITUTIONAL, JSON.stringify(parsed));
+      }
+      return { ...DEFAULT_INSTITUTIONAL_DATA, ...parsed };
     }
   } catch (e) {
     console.error('Error loading institutional data:', e);
