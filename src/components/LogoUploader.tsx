@@ -6,13 +6,14 @@ import {
   Check,
   RefreshCw,
   Image as ImageIcon,
-  Sparkles,
   Disc,
   LayoutTemplate,
   Layers,
   Monitor,
   Globe,
   Type,
+  Paperclip,
+  Sparkles,
 } from 'lucide-react';
 import { StationLogosConfig } from '../types';
 import {
@@ -22,7 +23,6 @@ import {
   applyDynamicFavicon,
   applyDynamicWindowsTile,
 } from '../utils/logo';
-import { RebeldiaLogo } from './RebeldiaLogo';
 
 interface LogoUploaderProps {
   onLogoChange?: (logos: StationLogosConfig) => void;
@@ -44,48 +44,48 @@ interface SlotDefinition {
 const SLOTS: SlotDefinition[] = [
   {
     key: 'headerLogo',
-    title: '1. Logotipo Acima do Menu & Cabeçalho',
-    badge: 'Topo / Menu',
+    title: 'Logo Topo (Cabeçalho do Site)',
+    badge: 'Cabeçalho / Topo',
     badgeColor: 'bg-amber-400/10 border-amber-400/30 text-amber-400',
-    description: 'Logotipo exibido no topo do site, logo acima dos botões de menu e navegação principal.',
-    recommendation: 'Formato horizontal ou mascote vetorial (PNG transparente ou SVG, altura máx. 80px).',
+    description: 'Logotipo principal exibido no topo do site, logo acima dos botões de menu e navegação.',
+    recommendation: 'Formato horizontal ou mascote vetorial (PNG transparente, SVG ou WebP). Altura ideal: 50 a 80px.',
     icon: <LayoutTemplate className="w-4 h-4 text-amber-400" />,
   },
   {
     key: 'playerCenterLogo',
-    title: '2. Logotipo Central do Círculo do Player (Somente o Maior)',
-    badge: 'Player Hero Central',
+    title: 'Logo Visualização Compacta (Ícone / Player)',
+    badge: 'Ícone & Player Central',
     badgeColor: 'bg-emerald-400/10 border-emerald-400/30 text-emerald-400',
-    description: 'Exibido exclusivamente no centro do disco giratório (vinil / spindle) do reprodutor principal no topo da tela.',
-    recommendation: 'Formato circular ou quadrado centralizado (PNG transparente ou JPG 250x250).',
+    description: 'Ícone exibido no centro do disco do player de áudio (círculo maior/vinil) e como ícone em modos compactos.',
+    recommendation: 'Formato quadrado ou circular (PNG transparente, SVG ou JPG 250x250).',
     icon: <Disc className="w-4 h-4 text-emerald-400" />,
   },
   {
-    key: 'footerLogo',
-    title: '3. Logotipo para o Rodapé',
-    badge: 'Rodapé Oficial',
-    badgeColor: 'bg-sky-400/10 border-sky-400/30 text-sky-400',
-    description: 'Logotipo exibido na base da página junto aos direitos autorais e links institucionais.',
-    recommendation: 'Versão monocromática ou colorida reduzida para fundo escuro (PNG transparente).',
-    icon: <Layers className="w-4 h-4 text-sky-400" />,
+    key: 'faviconIcon',
+    title: 'Five Icon (Favicon da Aba do Navegador)',
+    badge: 'Aba do Navegador / Favicon',
+    badgeColor: 'bg-purple-400/10 border-purple-400/30 text-purple-400',
+    description: 'Ícone exibido diretamente na aba do navegador (Chrome, Edge, Firefox, Safari) e na barra de favoritos.',
+    recommendation: 'Ícone quadrado compacto e nítido (PNG, ICO ou SVG de 32x32 ou 64x64 pixels).',
+    icon: <Globe className="w-4 h-4 text-purple-400" />,
   },
   {
     key: 'windowsTaskbarIcon',
-    title: '4. Ícone para Barra de Link Inferior do Windows (Atalho / PWA)',
-    badge: 'Windows & Barra de Tarefas',
+    title: 'Ícone da Barra de Tarefas Windows (Atalho / Favoritos)',
+    badge: 'Windows & PWA',
     badgeColor: 'bg-blue-400/10 border-blue-400/30 text-blue-400',
-    description: 'Ícone utilizado para a barra de links inferior do Windows, atalhos fixados na barra de tarefas e aplicativo web (PWA).',
+    description: 'Ícone utilizado para a barra de tarefas do Windows, atalhos fixados no sistema e ícone do aplicativo web (PWA).',
     recommendation: 'Ícone quadrado em alta definição (PNG ou ICO de 192x192 ou 512x512 pixels).',
     icon: <Monitor className="w-4 h-4 text-blue-400" />,
   },
   {
-    key: 'faviconIcon',
-    title: '5. Ícone Favicon (Fiveicon da Aba do Navegador)',
-    badge: 'Aba do Navegador',
-    badgeColor: 'bg-purple-400/10 border-purple-400/30 text-purple-400',
-    description: 'Ícone exibido diretamente na aba do navegador (Chrome, Edge, Firefox, Safari) e marcadores.',
-    recommendation: 'Ícone quadrado compacto e nítido (PNG, ICO ou SVG de 32x32 ou 64x64 pixels).',
-    icon: <Globe className="w-4 h-4 text-purple-400" />,
+    key: 'footerLogo',
+    title: 'Logo para o Rodapé (Footer da Emissora)',
+    badge: 'Rodapé Oficial',
+    badgeColor: 'bg-sky-400/10 border-sky-400/30 text-sky-400',
+    description: 'Logotipo exibido na base de todas as páginas da rádio, junto aos créditos institucionais.',
+    recommendation: 'Versão monocromática ou colorida reduzida para fundo escuro (PNG transparente).',
+    icon: <Layers className="w-4 h-4 text-sky-400" />,
   },
 ];
 
@@ -150,7 +150,7 @@ export const LogoUploader: React.FC<LogoUploaderProps> = ({ onLogoChange, classN
       const dataUrl = event.target?.result as string;
       if (dataUrl) {
         updateSingleLogo(slotKey, dataUrl);
-        showFeedback(`Logotipo de "${slotKey}" carregado com sucesso!`);
+        showFeedback(`Imagem anexada e atualizada com sucesso!`);
       }
       setUploadingSlot(null);
     };
@@ -159,6 +159,11 @@ export const LogoUploader: React.FC<LogoUploaderProps> = ({ onLogoChange, classN
       setUploadingSlot(null);
     };
     reader.readAsDataURL(file);
+
+    // Reseta o input para permitir selecionar o mesmo arquivo novamente se desejar
+    if (e.target) {
+      e.target.value = '';
+    }
   };
 
   const handleApplyUrl = (slotKey: SlotKey) => {
@@ -167,13 +172,13 @@ export const LogoUploader: React.FC<LogoUploaderProps> = ({ onLogoChange, classN
 
     updateSingleLogo(slotKey, url);
     setUrlInputs((prev) => ({ ...prev, [slotKey]: '' }));
-    showFeedback(`Logotipo de "${slotKey}" atualizado via link!`);
+    showFeedback(`Imagem aplicada via link com sucesso!`);
   };
 
   const handleResetSlot = (slotKey: SlotKey) => {
     const defaultValue = DEFAULT_STATION_LOGOS[slotKey] || '/reb_mascot.jpg';
     updateSingleLogo(slotKey, defaultValue);
-    showFeedback(`Logotipo restaurado para o padrão original.`);
+    showFeedback(`Logotipo restaurado para o padrão original da emissora.`);
   };
 
   const handleSaveComplementText = () => {
@@ -184,7 +189,7 @@ export const LogoUploader: React.FC<LogoUploaderProps> = ({ onLogoChange, classN
     setLogos(updated);
     saveStationLogos(updated);
     onLogoChange?.(updated);
-    showFeedback('Texto complementar do logotipo do cabeçalho salvo com sucesso!');
+    showFeedback('Texto complementar do cabeçalho salvo com sucesso!');
   };
 
   const handleResetAllToDefault = () => {
@@ -192,12 +197,12 @@ export const LogoUploader: React.FC<LogoUploaderProps> = ({ onLogoChange, classN
     setComplementTextInput(DEFAULT_STATION_LOGOS.headerComplementText || '');
     saveStationLogos(DEFAULT_STATION_LOGOS);
     onLogoChange?.(DEFAULT_STATION_LOGOS);
-    showFeedback('Todos os 5 logotipos e o texto complementar foram restaurados para os padrões de fábrica!');
+    showFeedback('Todas as imagens foram restauradas para os padrões originais da rádio!');
   };
 
   return (
     <div className={`p-5 sm:p-6 rounded-3xl bg-zinc-950 border border-zinc-800 space-y-6 shadow-xl ${className}`}>
-      {/* Header Central de Gestão Multi-Logo */}
+      {/* Header Central de Gestão de Imagens Dinâmicas */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800/80">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-2xl bg-amber-400/10 border border-amber-400/30 flex items-center justify-center text-amber-400 shadow-inner">
@@ -206,14 +211,14 @@ export const LogoUploader: React.FC<LogoUploaderProps> = ({ onLogoChange, classN
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-base font-black text-white font-display uppercase tracking-wider">
-                Central de Logotipos & Identidade Visual
+                Atualização de Imagens Dinâmicas da Rádio
               </h3>
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-400/10 border border-amber-400/30 text-amber-400">
-                5 Posições Exclusivas
+                100% Dinâmico
               </span>
             </div>
             <p className="text-xs text-zinc-400 mt-0.5">
-              Campos dedicados e independentes para cada área: Cabeçalho, Círculo Maior do Player, Rodapé, Barra do Windows e Favicon.
+              Botões de anexar imagem dedicados para cada posição: Topo, Visualização Compacta/Player, Five Icon (Favicon), Barra Windows e Rodapé.
             </p>
           </div>
         </div>
@@ -222,7 +227,7 @@ export const LogoUploader: React.FC<LogoUploaderProps> = ({ onLogoChange, classN
           type="button"
           onClick={handleResetAllToDefault}
           className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-zinc-800 hover:border-zinc-700 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shrink-0 self-start sm:self-auto"
-          title="Restaurar todos os 5 logotipos e texto para os padrões"
+          title="Restaurar todas as imagens para o padrão original"
         >
           <Trash2 className="w-3.5 h-3.5" />
           <span>Restaurar Todos os Padrões</span>
@@ -237,7 +242,7 @@ export const LogoUploader: React.FC<LogoUploaderProps> = ({ onLogoChange, classN
         </div>
       )}
 
-      {/* Grid com os 5 Campos Dedicados (Um campo para cada um) */}
+      {/* Lista com os 5 Slots Dedicados com Botão "Anexar Imagem" */}
       <div className="space-y-6">
         {SLOTS.map((slot) => {
           const currentVal = logos[slot.key] || DEFAULT_STATION_LOGOS[slot.key] || '/reb_mascot.jpg';
@@ -247,7 +252,7 @@ export const LogoUploader: React.FC<LogoUploaderProps> = ({ onLogoChange, classN
           return (
             <div
               key={slot.key}
-              className="p-5 rounded-2xl bg-zinc-900/70 border border-zinc-800 hover:border-zinc-700 transition space-y-4"
+              className="p-5 rounded-2xl bg-zinc-900/80 border border-zinc-800 hover:border-zinc-700 transition space-y-4"
             >
               {/* Título & Descrição do Slot */}
               <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -291,7 +296,7 @@ export const LogoUploader: React.FC<LogoUploaderProps> = ({ onLogoChange, classN
               {/* Área de Preview Visual do Slot */}
               <div className="p-4 rounded-xl bg-black/60 border border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
-                  {/* Preview Específico por tipo */}
+                  {/* 1. Preview Topo */}
                   {slot.key === 'headerLogo' && (
                     <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center gap-3">
                       <img
@@ -308,54 +313,46 @@ export const LogoUploader: React.FC<LogoUploaderProps> = ({ onLogoChange, classN
                     </div>
                   )}
 
+                  {/* 2. Preview Visualização Compacta (Ícone / Player) */}
                   {slot.key === 'playerCenterLogo' && (
-                    <div className="flex items-center gap-3">
-                      <div className="w-16 h-16 rounded-full bg-zinc-950 border border-zinc-700/80 flex items-center justify-center p-1 relative shadow-inner">
-                        <img
-                          src={currentVal}
-                          alt="Preview Centro do Player"
-                          className="w-full h-full rounded-full object-cover"
-                        />
-                        <div className="absolute w-5 h-5 rounded-full bg-zinc-950 border border-zinc-500 flex items-center justify-center">
-                          <span className="w-1 h-1 rounded-full bg-amber-400" />
+                    <div className="flex items-center gap-4 flex-wrap">
+                      {/* Centro do Player Maior */}
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-16 h-16 rounded-full bg-zinc-950 border border-zinc-700/80 flex items-center justify-center p-1 relative shadow-inner">
+                          <img
+                            src={currentVal}
+                            alt="Preview Centro do Player"
+                            className="w-full h-full rounded-full object-cover"
+                          />
+                          <div className="absolute w-5 h-5 rounded-full bg-zinc-950 border border-zinc-500 flex items-center justify-center">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                          </div>
                         </div>
+                        <span className="text-xs text-zinc-400 font-mono">
+                          Centro do Player (Vinil)
+                        </span>
                       </div>
-                      <span className="text-xs text-zinc-400 font-mono">
-                        Centro do Vinil (Player Maior)
-                      </span>
-                    </div>
-                  )}
 
-                  {slot.key === 'footerLogo' && (
-                    <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 flex flex-col items-center gap-1.5 min-w-[140px]">
-                      <img
-                        src={currentVal}
-                        alt="Preview Rodapé"
-                        className="h-7 w-auto object-contain"
-                      />
-                      <span className="text-[9px] text-zinc-500 font-mono">Visualização Rodapé</span>
-                    </div>
-                  )}
-
-                  {slot.key === 'windowsTaskbarIcon' && (
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-xl bg-zinc-950 border border-blue-500/30 flex items-center justify-center shadow-lg">
-                        <img
-                          src={currentVal}
-                          alt="Preview Barra Windows"
-                          className="w-10 h-10 object-contain rounded-lg"
-                        />
-                      </div>
-                      <div className="text-left text-[11px] font-mono text-zinc-400">
-                        <strong className="text-white block">Rebeldia FM</strong>
-                        <span className="text-[10px] text-blue-400">Atalho na Barra do Windows / PWA</span>
+                      {/* Mini Player Bar */}
+                      <div className="flex items-center gap-2 pl-3 border-l border-zinc-800">
+                        <div className="w-10 h-10 rounded-full bg-zinc-950 border border-zinc-700 flex items-center justify-center p-1 shadow-md">
+                          <img
+                            src={currentVal}
+                            alt="Mini Player"
+                            className="w-full h-full rounded-full object-cover"
+                          />
+                        </div>
+                        <span className="text-[11px] text-zinc-500 font-mono">
+                          Modo Compacto
+                        </span>
                       </div>
                     </div>
                   )}
 
+                  {/* 3. Preview Favicon (Five Icon) */}
                   {slot.key === 'faviconIcon' && (
                     <div className="flex items-center gap-3">
-                      <div className="px-3 py-1.5 rounded-t-lg bg-zinc-800 border-t border-x border-zinc-700 flex items-center gap-2 shadow">
+                      <div className="px-3.5 py-2 rounded-t-xl bg-zinc-800 border-t border-x border-zinc-700 flex items-center gap-2.5 shadow-md">
                         <img
                           src={currentVal}
                           alt="Preview Favicon"
@@ -366,6 +363,35 @@ export const LogoUploader: React.FC<LogoUploaderProps> = ({ onLogoChange, classN
                       <span className="text-[10px] text-zinc-500 font-mono">
                         Aba do Navegador (Favicon)
                       </span>
+                    </div>
+                  )}
+
+                  {/* 4. Preview Barra Windows (Atalho / Favoritos) */}
+                  {slot.key === 'windowsTaskbarIcon' && (
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 rounded-xl bg-zinc-950 border border-blue-500/30 flex items-center justify-center shadow-lg">
+                        <img
+                          src={currentVal}
+                          alt="Preview Barra Windows"
+                          className="w-10 h-10 object-contain rounded-lg shadow"
+                        />
+                      </div>
+                      <div className="text-left text-[11px] font-mono text-zinc-400">
+                        <strong className="text-white block">Rebeldia FM</strong>
+                        <span className="text-[10px] text-blue-400">Atalho da Barra do Windows / PWA</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 5. Preview Rodapé */}
+                  {slot.key === 'footerLogo' && (
+                    <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 flex flex-col items-center gap-1.5 min-w-[140px]">
+                      <img
+                        src={currentVal}
+                        alt="Preview Rodapé"
+                        className="h-8 w-auto object-contain"
+                      />
+                      <span className="text-[9px] text-zinc-500 font-mono">Visualização Rodapé</span>
                     </div>
                   )}
                 </div>
@@ -404,9 +430,9 @@ export const LogoUploader: React.FC<LogoUploaderProps> = ({ onLogoChange, classN
                 </div>
               )}
 
-              {/* Controles de Upload de Arquivo & URL para este Slot */}
+              {/* CONTROLES COM BOTÃO PROMINENTE "ANEXAR IMAGEM" */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 pt-1">
-                {/* 1. Upload de Arquivo Direto */}
+                {/* 1. Botão "Anexar Imagem" (Upload do Arquivo) */}
                 <div>
                   <input
                     ref={(el) => {
@@ -421,39 +447,52 @@ export const LogoUploader: React.FC<LogoUploaderProps> = ({ onLogoChange, classN
                     type="button"
                     onClick={() => fileInputRefs.current[slot.key]?.click()}
                     disabled={isSlotUploading}
-                    className="w-full px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 text-white text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
+                    className="w-full px-4 py-3 rounded-xl bg-gradient-to-r from-amber-500/20 via-zinc-800 to-zinc-800 hover:from-amber-500/30 hover:to-zinc-700 border border-amber-500/40 hover:border-amber-400 text-white text-xs font-black transition flex items-center justify-center gap-2 cursor-pointer active:scale-95 shadow-md disabled:opacity-50"
                   >
                     {isSlotUploading ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                      <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
                     ) : (
-                      <Upload className="w-3.5 h-3.5 text-amber-400" />
+                      <Paperclip className="w-4 h-4 text-amber-400 stroke-[2.5]" />
                     )}
-                    <span>{isSlotUploading ? 'Enviando Imagem...' : `Upload de Arquivo (${slot.badge})`}</span>
+                    <span className="text-white">
+                      {isSlotUploading ? 'Anexando Imagem...' : 'Anexar Imagem'}
+                    </span>
+                    <span className="text-[10px] text-amber-300/80 font-mono font-normal hidden sm:inline">
+                      ({slot.badge})
+                    </span>
                   </button>
+                  <span className="block text-[10px] text-zinc-500 mt-1 text-center">
+                    PNG transparente, SVG, JPG, WebP ou ICO (máx. 5MB)
+                  </span>
                 </div>
 
                 {/* 2. Inserção por URL Direta */}
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      type="url"
-                      placeholder="https://exemplo.com/imagem.png"
-                      value={urlInputs[slot.key] || ''}
-                      onChange={(e) =>
-                        setUrlInputs({ ...urlInputs, [slot.key]: e.target.value })
-                      }
-                      className="w-full pl-8 pr-3 py-2 rounded-xl bg-zinc-950 border border-zinc-700 text-white text-xs font-mono focus:outline-none focus:border-white"
-                    />
-                    <Link2 className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <div>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="url"
+                        placeholder="Ou cole o link direto da imagem (https://...)"
+                        value={urlInputs[slot.key] || ''}
+                        onChange={(e) =>
+                          setUrlInputs({ ...urlInputs, [slot.key]: e.target.value })
+                        }
+                        className="w-full pl-8 pr-3 py-2.5 rounded-xl bg-zinc-950 border border-zinc-700 text-white text-xs font-mono focus:outline-none focus:border-amber-400"
+                      />
+                      <Link2 className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleApplyUrl(slot.key)}
+                      disabled={!urlInputs[slot.key]?.trim()}
+                      className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-bold transition border border-zinc-700 cursor-pointer disabled:opacity-40"
+                    >
+                      Aplicar Link
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleApplyUrl(slot.key)}
-                    disabled={!urlInputs[slot.key]?.trim()}
-                    className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-bold transition border border-zinc-700 cursor-pointer disabled:opacity-40"
-                  >
-                    Aplicar
-                  </button>
+                  <span className="block text-[10px] text-zinc-500 mt-1 text-center">
+                    Atualiza imediatamente de servidores CDN ou links externos
+                  </span>
                 </div>
               </div>
             </div>

@@ -176,6 +176,12 @@ export default function App() {
         if (parsed.metadataDelaySeconds === undefined) {
           parsed.metadataDelaySeconds = 10;
         }
+        if (!parsed.location || parsed.location.toLowerCase().includes('canoas')) {
+          parsed.location = 'Florianópolis / SC, Brasil';
+          try {
+            localStorage.setItem('rebeldia_station_config', JSON.stringify(parsed));
+          } catch {}
+        }
         return parsed;
       }
       return DEFAULT_RADIO_CONFIG;
@@ -183,6 +189,28 @@ export default function App() {
       return DEFAULT_RADIO_CONFIG;
     }
   });
+
+  // Client-side cache migration to permanently purge any stale "Canoas" references
+  useEffect(() => {
+    try {
+      const keysToClean = [
+        'rebeldia_station_config',
+        'rebeldia_institutional_data_v2',
+        'rebeldia_institutional_data',
+        'rebeldia_station_logos',
+      ];
+      for (const k of keysToClean) {
+        const val = localStorage.getItem(k);
+        if (val && val.toLowerCase().includes('canoas')) {
+          const cleaned = val
+            .replace(/Canoas(\s*-\s*RS|\s*\/RS|\s*\/ RS)/gi, 'Florianópolis / SC')
+            .replace(/Canoas,?\s*(Rio Grande do Sul|RS)/gi, 'Florianópolis, Santa Catarina')
+            .replace(/Canoas/gi, 'Florianópolis');
+          localStorage.setItem(k, cleaned);
+        }
+      }
+    } catch {}
+  }, []);
 
   // Multi-Slot Station Logos State (Header, Player Center, Footer, Windows Taskbar, Favicon)
   const [stationLogos, setStationLogos] = useState<StationLogosConfig>(getStationLogos);
@@ -215,7 +243,7 @@ export default function App() {
   const [hasError, setHasError] = useState(false);
   const [volume, setVolume] = useState(0.85);
   const [isMuted, setIsMuted] = useState(false);
-  const [equalizerPreset, setEqualizerPreset] = useState<EqualizerPreset>('flat');
+  const [equalizerPreset, setEqualizerPreset] = useState<EqualizerPreset>('rock');
 
   // Stream Metadata State (Live song name & artist)
   const [streamMetadata, setStreamMetadata] = useState<StreamMetadata>({
@@ -528,20 +556,31 @@ export default function App() {
             ? sc.streamUrl
             : 'https://sv11.hdradios.net:6806/;';
         const validStreamUrl = normalizeStreamUrl(rawUrl, false);
-        setStationConfig((prev) => ({
-          ...prev,
-          name: sc.name || prev.name,
-          slogan: sc.slogan || prev.slogan,
-          streamUrl: validStreamUrl,
-          whatsappNumber: sc.whatsappNumber || prev.whatsappNumber,
-                    instagramHandle: sc.instagramHandle || prev.instagramHandle,
-          email: sc.email || prev.email,
-          location: sc.location || prev.location,
-          frequency: sc.frequency || prev.frequency,
-          logoUrl: sc.customLogo || sc.logoUrl || prev.logoUrl,
-          metadataDelaySeconds:
-            sc.metadataDelaySeconds !== undefined ? Number(sc.metadataDelaySeconds) : (prev.metadataDelaySeconds ?? 10),
-        }));
+        const cleanLocation =
+          sc.location && !sc.location.toLowerCase().includes('canoas')
+            ? sc.location
+            : 'Florianópolis / SC, Brasil';
+
+        setStationConfig((prev) => {
+          const updated = {
+            ...prev,
+            name: sc.name || prev.name,
+            slogan: sc.slogan || prev.slogan,
+            streamUrl: validStreamUrl,
+            whatsappNumber: sc.whatsappNumber || prev.whatsappNumber,
+            instagramHandle: sc.instagramHandle || prev.instagramHandle,
+            email: sc.email || prev.email,
+            location: cleanLocation,
+            frequency: sc.frequency || prev.frequency,
+            logoUrl: sc.customLogo || sc.logoUrl || prev.logoUrl,
+            metadataDelaySeconds:
+              sc.metadataDelaySeconds !== undefined ? Number(sc.metadataDelaySeconds) : (prev.metadataDelaySeconds ?? 10),
+          };
+          try {
+            localStorage.setItem('rebeldia_station_config', JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
         if (sc.customLogo) {
           saveCustomLogo(sc.customLogo);
         }
@@ -1311,13 +1350,13 @@ export default function App() {
       ) {
         programLogo = 'https://thumbnailer.mixcloud.com/unsafe/600x600/profile/1/f/4/3/97e4-9e7a-4868-aa44-a7b5b1e3d2e4';
       } else {
-        programLogo = stationConfig.logoUrl || '/reb_mascot.jpg';
+        programLogo = stationLogos.playerCenterLogo || stationLogos.headerLogo || stationConfig.logoUrl || '/reb_mascot.jpg';
       }
     }
 
     return {
       type: 'program' as const,
-      imageUrl: programLogo || stationConfig.logoUrl || '/reb_mascot.jpg',
+      imageUrl: programLogo || stationLogos.playerCenterLogo || stationLogos.headerLogo || stationConfig.logoUrl || '/reb_mascot.jpg',
       title: currentLiveProgram ? currentLiveProgram.title : stationConfig.name,
       badgeLabel: 'Logo do Programa',
       subtext: currentLiveProgram
@@ -1333,6 +1372,8 @@ export default function App() {
     currentLiveProgram,
     stationConfig.logoUrl,
     stationConfig.name,
+    stationLogos.playerCenterLogo,
+    stationLogos.headerLogo,
   ]);
 
   // Find current promo banner based on active status, program sync, or live dates
@@ -2138,7 +2179,9 @@ export default function App() {
             <span>•</span>
             <span className="flex items-center gap-1">
               <Globe className="w-3.5 h-3.5 text-zinc-400" />
-              {stationConfig.location}
+              {stationConfig.location && !stationConfig.location.toLowerCase().includes('canoas')
+                ? stationConfig.location
+                : 'Florianópolis / SC, Brasil'}
             </span>
             <span>•</span>
             <span className="flex items-center gap-1 text-emerald-400 font-mono text-[11px] bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-800/40">

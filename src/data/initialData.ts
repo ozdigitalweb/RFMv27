@@ -45,7 +45,7 @@ export const DEFAULT_RADIO_CONFIG: RadioStationConfig = {
   facebookUrl: 'https://facebook.com/rebeldiafm',
   websiteUrl: 'https://rebeldiafm.com.br',
   email: 'radio@rebeldiafm.com.br',
-  location: 'Florianopolis / SC, Brasil • Transmissão Global Web',
+  location: 'Florianópolis / SC, Brasil • Transmissão Global Web',
   bitrate: '128 kbps HD',
   codec: 'MP3 / AAC+ Stereo',
   logoUrl: '/reb_mascot.jpg',

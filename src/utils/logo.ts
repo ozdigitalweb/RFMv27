@@ -55,16 +55,32 @@ export function getStationLogos(): StationLogosConfig {
 
 export function applyDynamicFavicon(faviconUrl?: string | null): void {
   if (typeof document === 'undefined') return;
-  const url = (faviconUrl && faviconUrl.trim().length > 0) ? faviconUrl.trim() : '/reb_mascot.jpg';
+  const rawUrl = (faviconUrl && faviconUrl.trim().length > 0) ? faviconUrl.trim() : '/reb_mascot.jpg';
+  const url = rawUrl.startsWith('data:') ? rawUrl : `${rawUrl}?v=${Date.now()}`;
   
-  const linkIcon = document.querySelector<HTMLLinkElement>("link[rel='icon']");
-  if (linkIcon) linkIcon.href = url;
+  let linkIcon = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+  if (!linkIcon) {
+    linkIcon = document.createElement('link');
+    linkIcon.rel = 'icon';
+    document.head.appendChild(linkIcon);
+  }
+  linkIcon.href = url;
   
-  const linkShortcut = document.querySelector<HTMLLinkElement>("link[rel='shortcut icon']");
-  if (linkShortcut) linkShortcut.href = url;
+  let linkShortcut = document.querySelector<HTMLLinkElement>("link[rel='shortcut icon']");
+  if (!linkShortcut) {
+    linkShortcut = document.createElement('link');
+    linkShortcut.rel = 'shortcut icon';
+    document.head.appendChild(linkShortcut);
+  }
+  linkShortcut.href = url;
 
-  const linkApple = document.querySelector<HTMLLinkElement>("link[rel='apple-touch-icon']");
-  if (linkApple) linkApple.href = url;
+  let linkApple = document.querySelector<HTMLLinkElement>("link[rel='apple-touch-icon']");
+  if (!linkApple) {
+    linkApple = document.createElement('link');
+    linkApple.rel = 'apple-touch-icon';
+    document.head.appendChild(linkApple);
+  }
+  linkApple.href = url;
 }
 
 export function applyDynamicWindowsTile(iconUrl?: string | null): void {

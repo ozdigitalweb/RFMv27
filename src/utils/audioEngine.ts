@@ -72,7 +72,7 @@ class RadioAudioEngine {
   private syntheticPhase = 0;
   private currentVolume = 0.85;
   private isMutedState = false;
-  private currentEqualizer: 'flat' | 'bass' | 'rock' | 'pop' | 'vocal' | 'electronic' = 'flat';
+  private currentEqualizer: 'flat' | 'bass' | 'rock' | 'pop' | 'vocal' | 'electronic' = 'rock';
 
   public getAudioElement(): HTMLAudioElement {
     if (!this.audio) {

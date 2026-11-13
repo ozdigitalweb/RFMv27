@@ -172,7 +172,7 @@ A **Rebeldia FM** nasceu com o compromisso de defender a liberdade de expressão
 - **Painel Administrativo Yoast**: Aba dedicada para edição e auditoria em tempo real de metadados por página (`page_seo`).
 - **Simulador do Google Search**: Prévia visual exata do snippet no Google (Mobile e Desktop) com verificação de tamanho ideal de títulos (30–60 caracteres) e descrições (120–160 caracteres).
 - **Simulador Social**: Visualização dos cards de compartilhamento para WhatsApp, Facebook, LinkedIn e Twitter/X (`og:title`, `og:description`, `og:image`, `twitter:card`).
-- **Indexação Geográfica (GEO Tags)**: Suporte completo a Geotargeting (`geo.region`, `geo.placename`, `geo.position`, `ICBM`) centrado na sede da rádio em Canoas/RS e região metropolitana.
+- **Indexação Geográfica (GEO Tags)**: Suporte completo a Geotargeting (`geo.region`, `geo.placename`, `geo.position`, `ICBM`) centrado na sede da rádio em Florianópolis/SC e região metropolitana.
 - **Dados Estruturados Schema.org**: JSON-LD integrado (`RadioStation`, `BroadcastService`, `WebPage`).
 - **SSR Server Injection**: Injeção dinâmica no `<head>` das páginas servidas pelo `server.ts` para que robôs de busca e redes sociais leiam os metadados corretos diretamente no HTML.
 

@@ -207,8 +207,12 @@ export const GlobalPlayerBar: React.FC<GlobalPlayerBarProps> = ({
                   className="w-full h-full rounded-full object-cover pointer-events-none"
                 />
               ) : (
-                <div className="w-full h-full rounded-full bg-zinc-950 flex items-center justify-center pointer-events-none">
-                  <Music className="w-5 h-5 text-zinc-500" />
+                <div className="w-full h-full rounded-full bg-zinc-950 flex items-center justify-center pointer-events-none p-1">
+                  <img
+                    src={stationConfig.customLogo || stationConfig.logoUrl || '/reb_mascot.jpg'}
+                    alt="Logo Rádio"
+                    className="w-full h-full rounded-full object-cover"
+                  />
                 </div>
               )}
             </div>

@@ -731,8 +731,16 @@ export const InstitutionalView: React.FC<InstitutionalViewProps> = ({
             <div className="flex items-center gap-3">
               <MapPin className="w-4 h-4 text-amber-400 shrink-0" />
               <div className="text-xs">
-                <span className="font-bold text-zinc-200 block">{data.studioAddress}</span>
-                <span className="text-zinc-500 text-[11px]">{data.location}</span>
+                <span className="font-bold text-zinc-200 block">
+                  {data.studioAddress && !data.studioAddress.toLowerCase().includes('canoas')
+                    ? data.studioAddress
+                    : 'Estúdio Central Rebeldia • Florianópolis / SC, Brasil'}
+                </span>
+                <span className="text-zinc-500 text-[11px]">
+                  {data.location && !data.location.toLowerCase().includes('canoas')
+                    ? data.location
+                    : 'Florianópolis / SC, Brasil • Transmissão Global Web & App'}
+                </span>
               </div>
             </div>
             <span className="text-[11px] text-zinc-400 font-mono">
