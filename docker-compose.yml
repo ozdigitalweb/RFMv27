@@ -1,25 +1,6 @@
 version: '3.8'
 
 services:
-  db:
-    image: postgres:15-alpine
-    container_name: rebeldiafm-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${DB_USER:-rebeldiafm}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB: ${DB_NAME:-rebeldiafm}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - rebeldiafm-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-rebeldiafm} -d ${DB_NAME:-rebeldiafm}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
   app:
     build:
       context: .
@@ -27,36 +8,24 @@ services:
     container_name: rebeldiafm-app
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3000:3000"
+      - "3000:3000"
     env_file:
       - .env.production
     environment:
       - NODE_ENV=production
       - PORT=3000
-      - DATABASE_URL=postgresql://${DB_USER:-rebeldiafm}:${DB_PASSWORD}@db:5432/${DB_NAME:-rebeldiafm}?sslmode=disable
-      - SQL_HOST=db
-      - SQL_PORT=5432
-      - SQL_USER=${DB_USER:-rebeldiafm}
-      - SQL_PASSWORD=${DB_PASSWORD}
-      - SQL_DB_NAME=${DB_NAME:-rebeldiafm}
-    depends_on:
-      db:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 20s
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
 
-volumes:
-  postgres_data:
-
 networks:
-  rebeldiafm-network:
-    driver: bridge
+  default:
+    name: rebeldiafm-network
