@@ -1,0 +1,13 @@
+# COPY AND PASTE THIS ENTIRE BLOCK INTO WHM TERMINAL
+# ========================================================
+
+cd /home/rebeldiafm && curl -fsSL https://raw.githubusercontent.com/ozdigitalweb/RFMv27/producao/vps-deploy.sh | bash -s producao
+
+# ========================================================
+# That's it! This will:
+# 1. Backup current deployment
+# 2. Clone/pull latest code from producao branch
+# 3. Build Docker containers
+# 4. Start the application
+# 5. Run health checks
+# ========================================================
