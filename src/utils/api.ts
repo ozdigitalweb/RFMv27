@@ -654,6 +654,7 @@ export interface PageSeoData {
   ogTitle?: string;
   ogDescription?: string;
   ogImage?: string;
+  faviconUrl?: string;
   ogType?: string;
   twitterCard?: string;
   geoRegion?: string;

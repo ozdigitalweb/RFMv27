@@ -277,11 +277,11 @@ export const InstitutionalView: React.FC<InstitutionalViewProps> = ({
 
                     {/* Logo do Programa (Lado Direito, centralizado verticalmente) */}
                     {(currentProg.logoUrl || currentProg.avatarUrl) && (
-                      <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-20 h-20 sm:w-24 sm:h-24 rounded-xl bg-zinc-950/90 backdrop-blur-md p-1.5 sm:p-2 border border-white/20 shadow-2xl overflow-hidden flex items-center justify-center shrink-0 z-10 group-hover/image:border-amber-400/60 transition-all duration-300">
+                      <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-black/50 backdrop-blur-md p-[3px] shadow-2xl overflow-hidden flex items-center justify-center shrink-0 z-10 transition-all duration-300">
                         <img
                           src={currentProg.logoUrl || currentProg.avatarUrl}
                           alt={`Logo ${currentProg.title}`}
-                          className="w-full h-full object-contain filter drop-shadow-md rounded-lg"
+                          className="w-full h-full object-contain filter drop-shadow-md rounded-xl"
                         />
                       </div>
                     )}

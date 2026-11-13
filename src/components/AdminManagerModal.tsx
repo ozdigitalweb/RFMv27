@@ -79,6 +79,12 @@ import { LogoUploader } from './LogoUploader';
 import { AdminBannersSection } from './AdminBannersSection';
 import { AdminSeoSection } from './AdminSeoSection';
 import { INITIAL_PROMO_BANNERS, DEFAULT_REB_PROGRAM, INITIAL_HOST_ACCOUNTS } from '../data/initialData';
+import {
+  ensureSystemHosts,
+  isProtectedSystemHost,
+  isCoringaHost,
+  resolveHostWhatsapp,
+} from '../utils/hostPhone';
 
 interface AdminManagerModalProps {
   isOpen: boolean;
@@ -625,7 +631,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
     try {
       const data = await api.getHostAccounts();
       if (data && Array.isArray(data) && data.length > 0) {
-        setHostAccountsList(data);
+        setHostAccountsList(ensureSystemHosts(data, INITIAL_HOST_ACCOUNTS));
       } else {
         setHostAccountsList(INITIAL_HOST_ACCOUNTS);
       }
@@ -665,7 +671,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
       setHostAccountsList(nextList);
       await api.saveHostAccounts(nextList);
 
-      // Sincroniza automaticamente todos os programas vinculados a este locutor (foto, nome, cargo)
+      // Sincroniza automaticamente todos os programas vinculados a este locutor (foto, nome, cargo, whatsapp)
       const linkedPrograms = scheduleList.filter(
         (p) => p.hostAccountId === updated.id || p.host.toLowerCase() === updated.name.toLowerCase()
       );
@@ -677,7 +683,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
               hostAccountId: updated.id,
               avatarUrl: updated.avatarUrl || prog.avatarUrl,
               hostRole: updated.role || prog.hostRole,
-              whatsappNumber: updated.whatsapp || prog.whatsappNumber,
+              whatsappNumber: updated.whatsapp || null,
               hostBio: updated.bio || prog.hostBio,
             });
           } catch (e) {
@@ -685,9 +691,9 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
           }
         }
         await loadSchedule();
-        onRefreshData?.();
       }
 
+      onRefreshData?.();
       showToast(`Perfil do locutor ${updated.name} salvo com sucesso!`);
       setEditingHostAccount(null);
     } catch (err: unknown) {
@@ -699,8 +705,12 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
   };
 
   const handleDeleteHostAccount = (host: HostAccount) => {
-    if (host.id === 'host-reb') {
-      showToast('A conta REB Oficial é a conta mestre e não pode ser excluída.');
+    if (isProtectedSystemHost(host)) {
+      showToast(
+        isCoringaHost(host)
+          ? 'O perfil fixo Coringa é protegido pelo sistema e não pode ser excluído.'
+          : 'A conta REB Oficial é a conta mestre e não pode ser excluída.'
+      );
       return;
     }
     setConfirmDialog({
@@ -1035,6 +1045,12 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
 
     setIsSavingProgram(true);
     try {
+      const linkedHostForSave = hostAccountsList.find(
+        (h) =>
+          (editingProgram.hostAccountId && h.id === editingProgram.hostAccountId) ||
+          h.name.toLowerCase() === editingProgram.host.trim().toLowerCase()
+      );
+
       const payload = {
         dayOfWeek: editingProgram.dayOfWeek ?? 1,
         daysLabel: editingProgram.daysLabel?.trim() || null,
@@ -1057,7 +1073,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
         logoUrl: editingProgram.logoUrl?.trim() || null,
         hostBio: editingProgram.hostBio?.trim() || null,
         instagramHandle: editingProgram.instagramHandle?.trim() || null,
-        whatsappNumber: editingProgram.whatsappNumber?.trim() || '5548991984678',
+        whatsappNumber: linkedHostForSave?.whatsapp?.trim() || null,
         mixcloudUser: editingProgram.mixcloudUser?.trim() || null,
         mixcloudUrl: editingProgram.mixcloudUrl?.trim() || null,
         highlightsJson: JSON.stringify(editingProgram.highlights || []),
@@ -2930,7 +2946,9 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                             </div>
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                              {hostAccountsList.map((h) => {
+                              {hostAccountsList
+                                .filter((h) => !isCoringaHost(h))
+                                .map((h) => {
                                 const isSelected =
                                   (editingProgram.hostAccountId && editingProgram.hostAccountId === h.id) ||
                                   editingProgram.host.toLowerCase() === h.name.toLowerCase();
@@ -3164,49 +3182,71 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                             />
                           </div>
 
-                          {/* Redes Sociais & WhatsApp com Fallback Automático */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div className="space-y-1.5">
-                              <label className="block text-xs font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-1.5">
-                                <Instagram className="w-3.5 h-3.5 text-pink-400" />
-                                <span>Instagram (@usuario)</span>
-                              </label>
-                              <input
-                                type="text"
-                                value={editingProgram.instagramHandle}
-                                onChange={(e) => setEditingProgram({ ...editingProgram, instagramHandle: e.target.value })}
-                                placeholder="@locutor"
-                                className="w-full px-3.5 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs focus:outline-none focus:border-amber-400"
-                              />
-                            </div>
+                          {/* Rede Social & Telefone Automático do Locutor */}
+                          {(() => {
+                            const linkedHostForPhone = hostAccountsList.find(
+                              (h) =>
+                                (editingProgram.hostAccountId && h.id === editingProgram.hostAccountId) ||
+                                h.name.toLowerCase() === editingProgram.host.toLowerCase()
+                            );
+                            const inheritedWhatsapp = resolveHostWhatsapp(
+                              linkedHostForPhone,
+                              stationConfig?.whatsappNumber
+                            );
 
-                            <div className="space-y-1.5">
-                              <label className="block text-xs font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-1.5">
-                                <Phone className="w-3.5 h-3.5 text-emerald-400" />
-                                <span>Telefone WhatsApp do Apresentador</span>
-                              </label>
-                              <input
-                                type="text"
-                                value={editingProgram.whatsappNumber}
-                                onChange={(e) => setEditingProgram({ ...editingProgram, whatsappNumber: e.target.value })}
-                                placeholder="48 99198-4678"
-                                className="w-full px-3.5 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs focus:outline-none focus:border-emerald-400"
-                              />
-                            </div>
-                          </div>
+                            return (
+                              <>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                  <div className="space-y-1.5">
+                                    <label className="block text-xs font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-1.5">
+                                      <Instagram className="w-3.5 h-3.5 text-pink-400" />
+                                      <span>Instagram (@usuario)</span>
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={editingProgram.instagramHandle}
+                                      onChange={(e) => setEditingProgram({ ...editingProgram, instagramHandle: e.target.value })}
+                                      placeholder="@locutor"
+                                      className="w-full px-3.5 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs focus:outline-none focus:border-amber-400"
+                                    />
+                                  </div>
 
-                          {/* Informação sobre WhatsApp Default */}
-                          <div className="p-3.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 flex items-start gap-3">
-                            <Phone className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                            <div className="text-xs space-y-1">
-                              <span className="font-bold text-emerald-300 block">
-                                Roteamento Automático de Pedidos Musicais:
-                              </span>
-                              <p className="text-zinc-300 leading-relaxed text-[11px]">
-                                Durante o horário deste programa no ar, os ouvintes enviarão seus pedidos musicais diretamente para o WhatsApp cadastrado acima. Quando não houver programa no ar ou este campo for deixado em branco, os pedidos cairão automaticamente no número geral da rádio: <strong className="text-white font-mono font-bold">48 99198-4678</strong>.
-                              </p>
-                            </div>
-                          </div>
+                                  <div className="space-y-1.5">
+                                    <label className="block text-xs font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-1.5">
+                                      <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                                      <span>WhatsApp Ativo (Herdado do Locutor)</span>
+                                    </label>
+                                    <div className="px-3.5 py-2 rounded-xl bg-zinc-950 border border-emerald-500/30 flex items-center justify-between gap-2">
+                                      <span className="text-xs font-mono font-bold text-emerald-300 tabular-nums truncate">
+                                        {inheritedWhatsapp}
+                                      </span>
+                                      {linkedHostForPhone && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setEditingHostAccount(linkedHostForPhone)}
+                                          className="text-[10px] font-bold text-amber-400 hover:underline shrink-0 cursor-pointer"
+                                        >
+                                          Alterar no Locutor
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="p-3.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 flex items-start gap-3">
+                                  <Phone className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                                  <div className="text-xs space-y-1">
+                                    <span className="font-bold text-emerald-300 block">
+                                      Telefone vinculado ao Locutor (sem telefone por programa):
+                                    </span>
+                                    <p className="text-zinc-300 leading-relaxed text-[11px]">
+                                      A comunicação com os ouvintes utiliza exclusivamente o WhatsApp cadastrado no perfil do locutor responsável (<strong className="text-white font-mono tabular-nums">{inheritedWhatsapp}</strong>). Se o locutor não tiver número pessoal cadastrado, o sistema usa automaticamente o padrão da rádio (<strong className="text-white font-mono">5548991984678</strong>).
+                                    </p>
+                                  </div>
+                                </div>
+                              </>
+                            );
+                          })()}
 
                           {/* Navegação */}
                           <div className="pt-3 border-t border-zinc-800 flex justify-between">
@@ -4139,9 +4179,19 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                             <strong className="text-white font-mono">{editingProgram.playlist?.length || 0}</strong>
                           </div>
                           <div className="flex items-center justify-between text-zinc-400 text-[11px]">
-                            <span>Redes Conectadas:</span>
+                            <span>Redes & WhatsApp:</span>
                             <strong className="text-emerald-400 font-mono">
-                              {[editingProgram.instagramHandle, editingProgram.whatsappNumber].filter(Boolean).length}/2
+                              {[
+                                editingProgram.instagramHandle,
+                                resolveHostWhatsapp(
+                                  hostAccountsList.find(
+                                    (h) =>
+                                      (editingProgram.hostAccountId && h.id === editingProgram.hostAccountId) ||
+                                      h.name.toLowerCase() === editingProgram.host.toLowerCase()
+                                  ),
+                                  stationConfig?.whatsappNumber
+                                ),
+                              ].filter(Boolean).length}/2
                             </strong>
                           </div>
                         </div>
@@ -4247,7 +4297,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                           <div
                             key={host.id}
                             className={`p-4 rounded-2xl border transition flex flex-col justify-between gap-3 ${
-                              host.id === 'host-reb'
+                              isProtectedSystemHost(host)
                                 ? 'bg-amber-950/20 border-amber-500/40'
                                 : 'bg-zinc-950 border-zinc-800/80 hover:border-zinc-700'
                             }`}
@@ -4274,6 +4324,12 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                                       <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold uppercase font-mono flex items-center gap-1">
                                         <Bot className="w-2.5 h-2.5" />
                                         Robô AutoDJ • 24h
+                                      </span>
+                                    )}
+                                    {isCoringaHost(host) && (
+                                      <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold uppercase font-mono flex items-center gap-1">
+                                        <Sparkles className="w-2.5 h-2.5" />
+                                        Perfil Fixo • Coringa
                                       </span>
                                     )}
                                   </div>
@@ -4369,7 +4425,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                                   <span>Editar</span>
                                 </button>
 
-                                {host.id !== 'host-reb' && (
+                                {!isProtectedSystemHost(host) && (
                                   <button
                                     type="button"
                                     onClick={() => handleDeleteHostAccount(host)}
@@ -4473,7 +4529,9 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                                 placeholder="5548991984678"
                                 className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs focus:border-amber-400 focus:outline-none font-mono"
                               />
-                              <p className="text-[10px] text-zinc-500 mt-1">Padrão da rádio: 5548991984678</p>
+                              <p className="text-[10px] text-emerald-400/90 mt-1">
+                                Número único do locutor aplicado automaticamente aos seus programas e plantões Coringa (padrão: 5548991984678).
+                              </p>
                             </div>
                             <div>
                               <label className="block text-xs font-bold text-zinc-300 mb-1">Cargo / Função na Rádio</label>

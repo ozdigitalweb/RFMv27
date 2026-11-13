@@ -163,7 +163,6 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
   const [editGenre, setEditGenre] = useState(program?.genre || '');
   const [editDescription, setEditDescription] = useState(program?.description || '');
   const [editHostBio, setEditHostBio] = useState(program?.hostBio || '');
-  const [editWhatsapp, setEditWhatsapp] = useState(program?.whatsappNumber || '');
   const [editInstagram, setEditInstagram] = useState(program?.instagramHandle || '');
   const [editAvatarUrl, setEditAvatarUrl] = useState(program?.avatarUrl || '');
   const [editBannerUrl, setEditBannerUrl] = useState(program?.bannerUrl || '');
@@ -197,7 +196,6 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
       setEditGenre(program.genre || '');
       setEditDescription(program.description || '');
       setEditHostBio(program.hostBio || '');
-      setEditWhatsapp(program.whatsappNumber || '');
       setEditInstagram(program.instagramHandle || '');
       setEditAvatarUrl(program.avatarUrl || '');
       setEditBannerUrl(program.bannerUrl || '');
@@ -310,7 +308,6 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
       genre: editGenre.trim() || program.genre,
       description: editDescription.trim() || program.description,
       hostBio: editHostBio.trim() || program.hostBio,
-      whatsappNumber: editWhatsapp.trim() || program.whatsappNumber,
       instagramHandle: editInstagram.trim() || program.instagramHandle,
       avatarUrl: editAvatarUrl.trim() || program.avatarUrl,
       bannerUrl: editBannerUrl.trim() || program.bannerUrl,
@@ -521,13 +518,13 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
                 {/* Quadro Oficial de Identidade Visual do Programa (Subido ao topo no mobile conforme seta) */}
                 {program.logoUrl ? (
                   <div className="relative shrink-0 group/logo">
-                    <div className="w-[104px] h-[104px] sm:w-[130px] sm:h-[130px] rounded-2xl border-2 border-white shadow-2xl overflow-hidden relative flex items-center justify-center bg-black z-0">
-                      {/* Foto/Logo do Programa - fundo preto puro, sem foto do locutor por trás */}
+                    <div className="w-[104px] h-[104px] sm:w-[130px] sm:h-[130px] rounded-2xl shadow-2xl overflow-hidden relative flex items-center justify-center bg-black/50 backdrop-blur-md p-[3px] z-0">
+                      {/* Foto/Logo do Programa - borda de 3px com 50% de transparência e cantos arredondados */}
                       <img
                         src={program.logoUrl}
                         alt={`Logo ${program.title}`}
-                        className={`w-full h-full relative z-0 filter drop-shadow-md ${
-                          program.logoUrl === program.avatarUrl ? 'object-cover' : 'object-contain p-2'
+                        className={`w-full h-full relative z-0 filter drop-shadow-md rounded-xl ${
+                          program.logoUrl === program.avatarUrl ? 'object-cover' : 'object-contain'
                         }`}
                       />
                     </div>
@@ -580,6 +577,12 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
                     <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-wider bg-red-600 text-white animate-pulse flex items-center gap-1 shadow-sm">
                       <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
                       NO AR AGORA
+                    </span>
+                  )}
+                  {program.isCoringaActive && (
+                    <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-wider bg-amber-500 text-black flex items-center gap-1 shadow-sm">
+                      <Sparkles className="w-3 h-3" />
+                      MODO CORINGA
                     </span>
                   )}
                   {program.genre && (
@@ -916,8 +919,13 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
                   <div className="space-y-1 min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-                        Apresentador Oficial
+                        {program.isCoringaActive ? 'Apresentação em Modo Coringa' : 'Apresentador Oficial'}
                       </span>
+                      {program.isCoringaActive && (
+                        <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold">
+                          Coringa Ativo
+                        </span>
+                      )}
                       {program.hostRole && (
                         <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-white/10 text-zinc-300 font-medium">
                           {program.hostRole}
@@ -1484,15 +1492,15 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
                       <div>
                         <label className="block text-xs text-zinc-400 mb-1 font-medium flex items-center gap-1">
                           <Phone className="w-3.5 h-3.5 text-emerald-400" />
-                          WhatsApp Direto (com DDD)
+                          WhatsApp do Locutor (Somente Leitura)
                         </label>
-                        <input
-                          type="text"
-                          value={editWhatsapp}
-                          onChange={(e) => setEditWhatsapp(e.target.value)}
-                          placeholder="5548991984678"
-                          className="w-full bg-zinc-950 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-emerald-500 font-mono"
-                        />
+                        <div className="w-full bg-zinc-950 border border-emerald-500/30 rounded-xl px-3.5 py-2 text-sm text-emerald-300 font-mono tabular-nums flex items-center justify-between gap-2">
+                          <span>{program.whatsappNumber || stationConfig.whatsappNumber || '5548991984678'}</span>
+                          <span className="text-[10px] text-zinc-400 font-sans">Perfil do Locutor</span>
+                        </div>
+                        <p className="text-[10px] text-zinc-500 mt-1">
+                          O telefone de contato com ouvintes vem sempre do cadastro do locutor.
+                        </p>
                       </div>
 
                       <div>

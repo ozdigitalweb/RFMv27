@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Play,
   Pause,
@@ -12,6 +12,7 @@ import {
   Minimize,
 } from 'lucide-react';
 import { CardBackgroundVisualizer } from './Visualizer';
+import { radioAudio } from '../utils/audioEngine';
 
 interface MusicModeModalProps {
   isOpen: boolean;
@@ -48,6 +49,35 @@ export const MusicModeModal: React.FC<MusicModeModalProps> = ({
 }) => {
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
+  const modalPulseRingRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = modalPulseRingRef.current;
+    if (!isOpen || !el) return;
+
+    const isAudible = isPlaying && !isBuffering && !isMuted && volume > 0;
+    if (!isAudible) {
+      el.style.transform = 'scale(1)';
+      el.style.opacity = '0.2';
+      return;
+    }
+
+    let animId: number;
+    const tick = () => {
+      const { beatPulse } = radioAudio.getBeatMetrics();
+      if (modalPulseRingRef.current) {
+        const scale = 1 + beatPulse * 0.1;
+        const opacity = 0.22 + beatPulse * 0.65;
+        const glow = 12 + beatPulse * 28;
+        modalPulseRingRef.current.style.transform = `scale(${scale.toFixed(3)})`;
+        modalPulseRingRef.current.style.opacity = opacity.toFixed(2);
+        modalPulseRingRef.current.style.boxShadow = `0 0 ${glow.toFixed(1)}px rgba(245, 158, 11, ${(0.25 + beatPulse * 0.55).toFixed(2)})`;
+      }
+      animId = requestAnimationFrame(tick);
+    };
+    animId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animId);
+  }, [isOpen, isPlaying, isBuffering, isMuted, volume]);
 
   // Trava scroll da página de fundo e escuta ESC
   useEffect(() => {
@@ -239,10 +269,12 @@ export const MusicModeModal: React.FC<MusicModeModalProps> = ({
 
           {/* Botão do Player: Disco com a Capa do Álbum da Música no Ar */}
           <div className="relative flex items-center justify-center shrink-0">
-            {/* Anel de brilho pulsante quando ativo */}
-            {isPlaying && (
-              <div className="absolute -inset-2.5 sm:-inset-3 rounded-full pointer-events-none border border-amber-400/40 shadow-[0_0_30px_rgba(245,158,11,0.35)] animate-pulse will-change-transform" />
-            )}
+            {/* Anel de brilho pulsante sincronizado com a frequência/batida real */}
+            <div
+              ref={modalPulseRingRef}
+              className="absolute -inset-2.5 sm:-inset-3 rounded-full pointer-events-none border-2 border-amber-400/50 will-change-transform"
+              style={{ opacity: 0.2 }}
+            />
 
             <button
               onClick={onTogglePlay}

@@ -17,6 +17,7 @@ import { DEFAULT_REB_PROGRAM } from '../data/initialData';
 import {
   formatMainSchedule,
   formatRepriseSchedule,
+  getSlotExecutionDistanceMinutes,
 } from '../utils/scheduleFormatter';
 
 interface TodayScheduleSectionProps {
@@ -50,11 +51,18 @@ export const TodayScheduleSection: React.FC<TodayScheduleSectionProps> = ({
   onOpenFullSchedule,
   liveTakeover,
 }) => {
+  // Relógio atualizado por minuto para manter a ordenação de tempo sempre precisa
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNowMs(Date.now()), 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Dia atual da semana (0 = Domingo, 1 = Segunda, etc.)
-  const todayDayIndex = useMemo(() => new Date().getDay(), []);
-  
+  const todayDayIndex = useMemo(() => new Date(nowMs).getDay(), [nowMs]);
+
   // Estado do dia selecionado (inicia no dia atual)
-  const [selectedDay, setSelectedDay] = useState<number>(todayDayIndex);
+  const [selectedDay, setSelectedDay] = useState<number>(() => new Date().getDay());
 
   // Referência e efeito de auto-scroll suave para o dia selecionado (efeito slide mobile do hotsite)
   const mobileDaysContainerRef = useRef<HTMLDivElement>(null);
@@ -129,30 +137,67 @@ export const TodayScheduleSection: React.FC<TodayScheduleSectionProps> = ({
       }
     });
 
-    // Ordena programas principais: quem está no ar AGORA vai para o primeiro lugar, seguido pelo horário de início
+    const now = new Date(nowMs);
+
+    // Ordena do tempo de execução mais próximo/atual (ao vivo = 0 min) para o mais distante
     mainList.sort((a, b) => {
       const aIsLive =
-        (currentLiveProgram && currentLiveProgram.id === a.id) ||
-              (liveTakeover && liveTakeover.targetProgramId === a.id);
+        Boolean(currentLiveProgram && currentLiveProgram.id === a.id) ||
+        Boolean(liveTakeover && liveTakeover.targetProgramId === a.id);
       const bIsLive =
-        (currentLiveProgram && currentLiveProgram.id === b.id) ||
-              (liveTakeover && liveTakeover.targetProgramId === b.id);
+        Boolean(currentLiveProgram && currentLiveProgram.id === b.id) ||
+        Boolean(liveTakeover && liveTakeover.targetProgramId === b.id);
 
-      if (aIsLive && !bIsLive) return -1;
-      if (!aIsLive && bIsLive) return 1;
+      const isViewingToday = selectedDay === now.getDay();
 
+      const distA = getSlotExecutionDistanceMinutes(
+        isViewingToday && a.dayOfWeek === -1 ? -1 : selectedDay,
+        a.startTime,
+        a.endTime,
+        aIsLive,
+        now
+      );
+      const distB = getSlotExecutionDistanceMinutes(
+        isViewingToday && b.dayOfWeek === -1 ? -1 : selectedDay,
+        b.startTime,
+        b.endTime,
+        bIsLive,
+        now
+      );
+
+      if (distA !== distB) return distA - distB;
       return a.startTime.localeCompare(b.startTime);
     });
 
-    // Ordena reprises em segundo plano cronologicamente
+    // Ordena reprises do tempo de execução mais próximo para o mais distante
     repriseList.sort((a, b) => {
       const timeA = a.repriseStartTime || a.startTime;
+      const endA = a.repriseEndTime || a.endTime;
       const timeB = b.repriseStartTime || b.startTime;
+      const endB = b.repriseEndTime || b.endTime;
+      const isViewingToday = selectedDay === now.getDay();
+
+      const distA = getSlotExecutionDistanceMinutes(
+        isViewingToday && a.repriseDayOfWeek === -1 ? -1 : selectedDay,
+        timeA,
+        endA,
+        false,
+        now
+      );
+      const distB = getSlotExecutionDistanceMinutes(
+        isViewingToday && b.repriseDayOfWeek === -1 ? -1 : selectedDay,
+        timeB,
+        endB,
+        false,
+        now
+      );
+
+      if (distA !== distB) return distA - distB;
       return timeA.localeCompare(timeB);
     });
 
     return { liveAndMainPrograms: mainList, reprisePrograms: repriseList };
-  }, [programs, selectedDay, currentLiveProgram, liveTakeover]);
+  }, [programs, selectedDay, currentLiveProgram, liveTakeover, nowMs]);
 
   const hasAnyPrograms = liveAndMainPrograms.length > 0 || reprisePrograms.length > 0;
 
@@ -243,7 +288,7 @@ export const TodayScheduleSection: React.FC<TodayScheduleSectionProps> = ({
 
             {/* Logo Oficial do Programa ampliado no canto superior direito */}
             {prog.logoUrl && (
-              <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-zinc-950/90 backdrop-blur-md p-1.5 sm:p-2 border border-white/20 shadow-2xl flex items-center justify-center overflow-hidden shrink-0 group-hover:border-amber-400/60 transition">
+              <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-black/50 backdrop-blur-md p-[3px] shadow-2xl flex items-center justify-center overflow-hidden shrink-0 transition">
                 <img
                   src={prog.logoUrl}
                   alt={`Logo ${prog.title}`}

@@ -9,6 +9,7 @@ import { getOrCreateUser } from './src/db/users.ts';
 import { requireAuth, optionalAuth, type AuthRequest } from './src/middleware/auth.ts';
 import { desc, eq, sql } from 'drizzle-orm';
 import { OFFICIAL_HOSTS, OFFICIAL_SCHEDULE_ITEMS, getProgramSeedKey } from './src/data/officialData.ts';
+import { findProgramBySlug, getProgramLogoSrc, getProgramSlug } from './src/utils/slug.ts';
 import { runMigrations } from './server/migrations/migrator.ts';
 
 // Password hashing (scrypt) & verification
@@ -47,6 +48,11 @@ export interface SafeHostAccount {
   avatarUrl: string;
   whatsapp: string;
   status: string;
+  isMascot?: boolean;
+  isFixedCoringa?: boolean;
+  programIds?: string[];
+  programId?: string;
+  programTitle?: string;
 }
 
 function sanitizeHostAccount(acc: any): SafeHostAccount {
@@ -59,7 +65,42 @@ function sanitizeHostAccount(acc: any): SafeHostAccount {
     avatarUrl: String(acc?.avatarUrl || ''),
     whatsapp: String(acc?.whatsapp || ''),
     status: String(acc?.status || 'active'),
+    ...(acc?.isMascot ? { isMascot: true } : {}),
+    ...(acc?.isFixedCoringa || acc?.id === 'host-coringa' || String(acc?.username || '').toLowerCase() === 'coringa'
+      ? { isFixedCoringa: true }
+      : {}),
+    ...(Array.isArray(acc?.programIds) ? { programIds: acc.programIds.map(String) } : {}),
+    ...(acc?.programId ? { programId: String(acc.programId) } : {}),
+    ...(acc?.programTitle ? { programTitle: String(acc.programTitle) } : {}),
   };
+}
+
+function ensureFixedSystemHosts(accounts: any[], hashFn: (p: string) => string): { list: any[]; changed: boolean } {
+  const list = Array.isArray(accounts) ? [...accounts] : [];
+  let changed = false;
+  for (const fixedId of ['host-reb', 'host-coringa']) {
+    const exists = list.some(
+      (h: any) => h?.id === fixedId || (fixedId === 'host-coringa' && String(h?.username || '').toLowerCase() === 'coringa')
+    );
+    if (!exists) {
+      const def = OFFICIAL_HOSTS.find((h) => h.id === fixedId);
+      if (def) {
+        const entry = {
+          ...def,
+          password: hashFn(def.password || 'senha123'),
+        };
+        if (fixedId === 'host-coringa') {
+          const rebIdx = list.findIndex((h: any) => h?.id === 'host-reb');
+          if (rebIdx >= 0) list.splice(rebIdx + 1, 0, entry);
+          else list.unshift(entry);
+        } else {
+          list.unshift(entry);
+        }
+        changed = true;
+      }
+    }
+  }
+  return { list, changed };
 }
 
 async function startServer() {
@@ -204,6 +245,17 @@ async function startServer() {
           .onConflictDoNothing();
         console.log('✅ Locutores oficiais inseridos pela primeira vez.');
       } else {
+        try {
+          const existingHosts = JSON.parse(hostRow.value);
+          const { list: patchedHosts, changed } = ensureFixedSystemHosts(existingHosts, hashPassword);
+          if (changed) {
+            await db
+              .update(stationSettings)
+              .set({ value: JSON.stringify(patchedHosts), updatedAt: new Date() })
+              .where(eq(stationSettings.key, 'hostAccountsJson'));
+            console.log('🃏 Perfil fixo Coringa adicionado automaticamente aos locutores existentes.');
+          }
+        } catch {}
         console.log('🎙️ Locutores oficiais verificados no banco (senhas e dados existentes preservados).');
       }
 
@@ -326,6 +378,17 @@ async function startServer() {
             updatedAt: new Date(),
           })
           .onConflictDoNothing();
+      } else {
+        try {
+          const existingHosts = JSON.parse(hostRow.value);
+          const { list: patchedHosts, changed } = ensureFixedSystemHosts(existingHosts, hashPassword);
+          if (changed) {
+            await db
+              .update(stationSettings)
+              .set({ value: JSON.stringify(patchedHosts), updatedAt: new Date() })
+              .where(eq(stationSettings.key, 'hostAccountsJson'));
+          }
+        } catch {}
       }
 
       res.json({
@@ -1025,14 +1088,13 @@ async function startServer() {
         try {
           const parsed = JSON.parse(row.value);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            accounts = parsed;
+            accounts = ensureFixedSystemHosts(parsed, hashPassword).list;
           }
         } catch {
           accounts = DEFAULT_INITIAL_HOSTS;
         }
       }
 
-      // Devolve estritamente apenas: id, name, username, role, bio, avatarUrl, whatsapp, status (sem senha nem hash)
       const sanitized = accounts.map(sanitizeHostAccount);
       res.json(sanitized);
     } catch (error) {
@@ -1171,7 +1233,7 @@ async function startServer() {
         try {
           const parsed = JSON.parse(row.value);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            accounts = parsed;
+            accounts = ensureFixedSystemHosts(parsed, hashPassword).list;
           }
         } catch {
           accounts = DEFAULT_INITIAL_HOSTS;
@@ -1242,7 +1304,7 @@ async function startServer() {
         try {
           const parsed = JSON.parse(row.value);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            accounts = parsed;
+            accounts = ensureFixedSystemHosts(parsed, hashPassword).list;
           }
         } catch {
           accounts = DEFAULT_INITIAL_HOSTS;
@@ -1333,7 +1395,7 @@ async function startServer() {
         } catch {}
       }
 
-      const mergedAccounts = validAccounts.map((acc: any) => {
+      const mergedAccountsRaw = validAccounts.map((acc: any) => {
         const existing = existingAccounts.find(
           (e: any) => (acc.id && e.id === acc.id) || (acc.username && e.username === acc.username)
         );
@@ -1353,6 +1415,18 @@ async function startServer() {
           password: finalPassword,
         };
       });
+
+      // Preserva perfis fixos do sistema (REB e Coringa) mesmo se omitidos do payload
+      for (const fixedId of ['host-reb', 'host-coringa']) {
+        if (!mergedAccountsRaw.some((a: any) => a.id === fixedId)) {
+          const existingFixed = existingAccounts.find((e: any) => e.id === fixedId);
+          if (existingFixed) {
+            mergedAccountsRaw.unshift(existingFixed);
+          }
+        }
+      }
+
+      const mergedAccounts = ensureFixedSystemHosts(mergedAccountsRaw, hashPassword).list;
 
       await db
         .insert(stationSettings)
@@ -1978,71 +2052,162 @@ async function startServer() {
 
   const memorySeoMap = new Map<string, any>(Object.entries(DEFAULT_PAGE_SEO));
 
-  async function getSeoForPath(rawPath: string): Promise<any> {
+  function getRequestOrigin(req: express.Request): string {
+    const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+    const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+    const host = forwardedHost || req.get('host') || '';
+    if (!host) return 'https://rebeldiafm.com.br';
+    const proto = forwardedProto || (host.includes('localhost') || host.startsWith('127.0.0.1') ? req.protocol || 'http' : 'https');
+    return `${proto}://${host}`;
+  }
+
+  function resolveProgramMediaUrls(rawLogo: string, slug: string, origin: string): { ogImage: string; faviconUrl: string } {
+    const clean = String(rawLogo || '').trim();
+    if (!clean) {
+      return { ogImage: `${origin}/reb_mascot.jpg`, faviconUrl: '/reb_mascot.jpg' };
+    }
+    if (clean.startsWith('data:image/')) {
+      const httpImgUrl = `${origin}/api/program-og-image/${encodeURIComponent(slug)}?v=${clean.length}`;
+      const relImgUrl = `/api/program-og-image/${encodeURIComponent(slug)}?v=${clean.length}`;
+      return { ogImage: httpImgUrl, faviconUrl: relImgUrl };
+    }
+    if (clean.startsWith('/')) {
+      return { ogImage: `${origin}${clean}`, faviconUrl: clean };
+    }
+    if (clean.startsWith('http://') || clean.startsWith('https://')) {
+      return { ogImage: clean, faviconUrl: clean };
+    }
+    return { ogImage: `${origin}/reb_mascot.jpg`, faviconUrl: '/reb_mascot.jpg' };
+  }
+
+  async function loadScheduleProgramsForSeo(): Promise<any[]> {
+    let progs: any[] = [];
+    if (isDbConfigured) {
+      try {
+        progs = await db.select().from(schedule);
+      } catch (dbErr) {
+        console.error('[SEO] Erro ao consultar schedule no DB, usando fallback oficial:', dbErr);
+      }
+    }
+    if (!progs || progs.length === 0) {
+      progs = OFFICIAL_SCHEDULE_ITEMS.map((item, idx) => ({ id: idx + 1, ...item }));
+    }
+    return progs;
+  }
+
+  // Endpoint HTTP real para servir logo de programa (converte base64 data:image em imagem binária para WhatsApp/OG/Favicon)
+  app.get('/api/program-og-image/:slug', async (req, res) => {
+    try {
+      const rawSlug = String(req.params.slug || '').trim();
+      const progs = await loadScheduleProgramsForSeo();
+      const found = findProgramBySlug(progs, rawSlug);
+      const rawLogo = found ? getProgramLogoSrc(found) : '/reb_mascot.jpg';
+
+      if (rawLogo.startsWith('data:image/')) {
+        const match = rawLogo.match(/^data:(image\/[a-z0-9+.-]+);base64,(.+)$/i);
+        if (match) {
+          const mimeType = match[1];
+          const buffer = Buffer.from(match[2], 'base64');
+          res.setHeader('Content-Type', mimeType);
+          res.setHeader('Content-Length', String(buffer.length));
+          res.setHeader('Cache-Control', 'public, max-age=300');
+          return res.status(200).send(buffer);
+        }
+      }
+
+      if (rawLogo.startsWith('http://') || rawLogo.startsWith('https://')) {
+        return res.redirect(302, rawLogo);
+      }
+
+      const safeRel = (rawLogo.startsWith('/') ? rawLogo : '/reb_mascot.jpg').split('?')[0].replace(/^\/+/, '');
+      const candidates = [
+        path.join(process.cwd(), 'public', safeRel),
+        path.join(process.cwd(), 'dist', safeRel),
+        path.join(process.cwd(), 'public', 'reb_mascot.jpg'),
+        path.join(process.cwd(), 'dist', 'reb_mascot.jpg'),
+      ];
+      for (const filePath of candidates) {
+        if (fs.existsSync(filePath)) {
+          res.setHeader('Cache-Control', 'public, max-age=300');
+          return res.sendFile(filePath);
+        }
+      }
+      return res.status(404).end();
+    } catch (err) {
+      console.error('[SEO] Erro ao servir imagem OG do programa:', err);
+      const fallbackPath = path.join(process.cwd(), 'public', 'reb_mascot.jpg');
+      if (fs.existsSync(fallbackPath)) {
+        return res.sendFile(fallbackPath);
+      }
+      return res.status(404).end();
+    }
+  });
+
+  async function getSeoForPath(rawPath: string, origin = 'https://rebeldiafm.com.br'): Promise<any> {
     const cleanPath = (rawPath || '/').split('?')[0].replace(/\/+$/, '') || '/';
 
-    // 1. Verificar se é hotsite de programa: /programas/:slug
+    // 1. Hotsite individual de programa: /programas/:slug (única seção que leva logo do programa)
     if (cleanPath.startsWith('/programas/') && cleanPath !== '/programas') {
-      const slug = cleanPath.replace('/programas/', '').trim();
-      if (isDbConfigured) {
-        try {
-          const progs = await db.select().from(schedule);
-          const found = progs.find((p) => {
-            const progSlug = (p.seedKey || p.title)
-              .toLowerCase()
-              .normalize('NFD')
-              .replace(/[\u0300-\u036f]/g, '')
-              .replace(/[^a-z0-9]+/g, '-')
-              .replace(/^-|-$/g, '');
-            return progSlug === slug || String(p.id) === slug;
-          });
-          if (found) {
-            return {
-              path: cleanPath,
-              title: `${found.title} - Com ${found.host} | Rebeldia FM`,
-              description: found.description || `Hotsite oficial do programa ${found.title} na Rebeldia FM. Horários, playlist, fotos e podcasts.`,
-              keywords: `rebeldia fm, ${found.title}, ${found.host}, ${found.genre || 'rock'}, florianopolis sc`,
-              canonicalUrl: `https://rebeldiafm.com.br${cleanPath}`,
-              ogTitle: `${found.title} - Com ${found.host}`,
-              ogDescription: found.description || `Ouça ${found.title} na Rebeldia FM com ${found.host}.`,
-              ogImage: found.avatarUrl || found.bannerUrl || '/reb_mascot.jpg',
-              ogType: 'music.radio_station',
-              twitterCard: 'summary_large_image',
-              geoRegion: 'BR-SC',
-              geoPlacename: 'Florianopolis, Santa Catarina, Brasil',
-              geoPosition: '-27.5954;-48.5480',
-              icbm: '-27.5954, -48.5480',
-              schemaType: 'BroadcastService',
-            };
-          }
-        } catch (e) {
-          console.error('[SEO] Erro ao resolver SEO para hotsite de programa:', e);
+      const slug = decodeURIComponent(cleanPath.replace('/programas/', '').trim()).toLowerCase();
+      try {
+        const progs = await loadScheduleProgramsForSeo();
+        const found = findProgramBySlug(progs, slug);
+
+        if (found) {
+          const resolvedSlug = getProgramSlug(found) || slug;
+          const rawProgramLogo = getProgramLogoSrc(found);
+          const { ogImage, faviconUrl } = resolveProgramMediaUrls(rawProgramLogo, resolvedSlug, origin);
+          return {
+            path: cleanPath,
+            title: `${found.title} - Com ${found.host} | Rebeldia FM`,
+            description: found.description || `Hotsite oficial do programa ${found.title} na Rebeldia FM. Horários, playlist, fotos e podcasts.`,
+            keywords: `rebeldia fm, ${found.title}, ${found.host}, ${found.genre || 'rock'}, florianopolis sc`,
+            canonicalUrl: `${origin}${cleanPath}`,
+            ogTitle: `${found.title} - Com ${found.host}`,
+            ogDescription: found.description || `Ouça ${found.title} na Rebeldia FM com ${found.host}.`,
+            ogImage,
+            faviconUrl,
+            ogType: 'website',
+            twitterCard: 'summary_large_image',
+            geoRegion: 'BR-SC',
+            geoPlacename: 'Florianopolis, Santa Catarina, Brasil',
+            geoPosition: '-27.5954;-48.5480',
+            icbm: '-27.5954, -48.5480',
+            schemaType: 'BroadcastService',
+          };
         }
+      } catch (e) {
+        console.error('[SEO] Erro ao resolver SEO para hotsite de programa:', e);
       }
     }
 
-    // 2. Consultar banco de dados se configurado
+    // 2. Demais rotas do site permanecem estritamente com o mascote (/reb_mascot.jpg)
     if (isDbConfigured) {
       try {
         const rows = await db.select().from(pageSeo).where(eq(pageSeo.path, cleanPath)).limit(1);
         if (rows && rows.length > 0) {
-          return rows[0];
+          return {
+            ...rows[0],
+            ogImage: `${origin}/reb_mascot.jpg`,
+            faviconUrl: '/reb_mascot.jpg',
+          };
         }
       } catch (err) {
         console.error('[SEO] Erro na consulta do banco, usando memória/default:', err);
       }
     }
 
-    // 3. Fallback para mapa em memória ou padrão
-    return memorySeoMap.get(cleanPath) || DEFAULT_PAGE_SEO[cleanPath] || {
+    // 3. Fallback para mapa em memória ou padrão (sempre mascote)
+    const fallbackSeo = memorySeoMap.get(cleanPath) || DEFAULT_PAGE_SEO[cleanPath] || {
       path: cleanPath,
       title: 'Rebeldia FM - Rádio Web Livre',
       description: 'Ouça a rádio livre e independente 24 horas no ar. Rock, cultura e pedidos musicais.',
       keywords: 'rebeldia fm, radio livre, florianopolis',
-      canonicalUrl: `https://rebeldiafm.com.br${cleanPath}`,
+      canonicalUrl: `${origin}${cleanPath}`,
       ogTitle: 'Rebeldia FM - Rádio Web Livre',
       ogDescription: 'A verdadeira rádio web livre. Rock, cultura e resistência no ar.',
-      ogImage: '/reb_mascot.jpg',
+      ogImage: `${origin}/reb_mascot.jpg`,
+      faviconUrl: '/reb_mascot.jpg',
       ogType: 'website',
       twitterCard: 'summary_large_image',
       geoRegion: 'BR-SC',
@@ -2050,6 +2215,11 @@ async function startServer() {
       geoPosition: '-27.5954;-48.5480',
       icbm: '-27.5954, -48.5480',
       schemaType: 'RadioStation',
+    };
+    return {
+      ...fallbackSeo,
+      ogImage: `${origin}/reb_mascot.jpg`,
+      faviconUrl: '/reb_mascot.jpg',
     };
   }
 
@@ -2062,14 +2232,24 @@ async function startServer() {
       .replace(/'/g, '&#039;');
   }
 
-  function injectSeoMetadata(html: string, seo: any): string {
+  function injectSeoMetadata(html: string, seo: any, origin = 'https://rebeldiafm.com.br'): string {
     const title = escapeHtml(seo.title || 'Rebeldia FM - Rádio Web Livre');
     const description = escapeHtml(seo.description || 'Aplicativo oficial da Rádio Web Rebeldia FM.');
     const keywords = escapeHtml(seo.keywords || 'radio livre, rebeldia fm, rock web radio');
-    const canonical = escapeHtml(seo.canonicalUrl || 'https://rebeldiafm.com.br' + (seo.path || ''));
-    const ogTitle = escapeHtml(seo.ogTitle || seo.title || 'Rebeldia FM');
-    const ogDescription = escapeHtml(seo.ogDescription || seo.description || '');
-    const ogImage = escapeHtml(seo.ogImage || '/reb_mascot.jpg');
+    const canonical = escapeHtml(seo.canonicalUrl || `${origin}${seo.path || '/'}`);
+    const ogTitle = escapeHtml(seo.ogTitle || seo.title || 'Rebeldia FM - Rádio Web Livre');
+    const ogDescription = escapeHtml(
+      (seo.ogDescription && String(seo.ogDescription).trim()) ||
+      (seo.description && String(seo.description).trim()) ||
+      'A verdadeira rádio web livre. Rock, cultura e resistência no ar.'
+    );
+    const rawOgImage = String(seo.ogImage || '/reb_mascot.jpg').trim();
+    const safeRawOg = rawOgImage.startsWith('data:') ? '/reb_mascot.jpg' : rawOgImage;
+    const absOgImage = safeRawOg.startsWith('/') ? `${origin}${safeRawOg}` : safeRawOg;
+    const ogImage = escapeHtml(absOgImage);
+    const rawFavicon = String(seo.faviconUrl || '/reb_mascot.jpg').trim();
+    const safeFavicon = rawFavicon.startsWith('data:') ? '/reb_mascot.jpg' : rawFavicon;
+    const faviconHref = escapeHtml(safeFavicon);
     const ogType = escapeHtml(seo.ogType || 'website');
     const twitterCard = escapeHtml(seo.twitterCard || 'summary_large_image');
     const geoRegion = escapeHtml(seo.geoRegion || 'BR-SC');
@@ -2084,9 +2264,10 @@ async function startServer() {
     const jsonLd = seo.jsonLdCustom || JSON.stringify({
       '@context': 'https://schema.org',
       '@type': schemaType,
-      'name': title,
-      'description': description,
-      'url': canonical,
+      'name': seo.title || 'Rebeldia FM',
+      'description': seo.description || 'Aplicativo oficial da Rádio Web Rebeldia FM.',
+      'url': seo.canonicalUrl || `${origin}${seo.path || '/'}`,
+      'image': absOgImage,
       'address': {
         '@type': 'PostalAddress',
         'addressLocality': 'Florianopolis',
@@ -2103,23 +2284,42 @@ async function startServer() {
     let output = html;
 
     // Atualiza Title
-    output = output.replace(/<title>.*?<\/title>/is, `<title>${title}</title>`);
+    output = output.replace(/<title>[\s\S]*?<\/title>/is, `<title>${title}</title>`);
 
-    // Atualiza ou insere Meta Description
-    if (output.includes('name="description"')) {
-      output = output.replace(/<meta\s+name="description"\s+content=".*?"\s*\/?>/is, `<meta name="description" content="${description}" />`);
+    // Atualiza Meta Description
+    if (/name=["']description["']/i.test(output)) {
+      output = output.replace(/<meta[^>]*name=["']description["'][^>]*>/is, `<meta name="description" content="${description}" />`);
     }
 
-    // Bloco SEO & GEO Yoast
+    // Atualiza os ícones de favicon / shortcut / apple-touch-icon
+    output = output
+      .replace(/<link[^>]*rel=["']icon["'][^>]*>/is, `<link rel="icon" href="${faviconHref}" />`)
+      .replace(/<link[^>]*rel=["']shortcut icon["'][^>]*>/is, `<link rel="shortcut icon" href="${faviconHref}" />`)
+      .replace(/<link[^>]*rel=["']apple-touch-icon["'][^>]*>/is, `<link rel="apple-touch-icon" href="${faviconHref}" />`);
+
+    // Remove tags estáticas duplicadas do index.html para evitar que crawlers (WhatsApp/FB) leiam o fallback antigo primeiro
+    output = output
+      .replace(/<meta[^>]*property=["']og:[^"']+["'][^>]*>\s*/gi, '')
+      .replace(/<meta[^>]*name=["']twitter:[^"']+["'][^>]*>\s*/gi, '')
+      .replace(/<meta[^>]*name=["']keywords["'][^>]*>\s*/gi, '')
+      .replace(/<link[^>]*rel=["']canonical["'][^>]*>\s*/gi, '')
+      .replace(/<meta[^>]*name=["']geo\.[^"']+["'][^>]*>\s*/gi, '')
+      .replace(/<meta[^>]*name=["']ICBM["'][^>]*>\s*/gi, '')
+      .replace(/<!--\s*Open Graph & Social Cards\s*-->\s*/gi, '')
+      .replace(/<!--\s*Yoast Style SEO & GEO Metadata\s*-->[\s\S]*?<\/script>\s*/gi, '');
+
+    // Bloco SEO & GEO posicionado logo no início do <head> para leitura imediata por crawlers (WhatsApp, Facebook, X)
     const seoBlock = `
     <!-- Yoast Style SEO & GEO Metadata -->
     <meta name="keywords" content="${keywords}" />
     <link rel="canonical" href="${canonical}" />
+    <meta property="og:locale" content="pt_BR" />
     <meta property="og:title" content="${ogTitle}" />
     <meta property="og:description" content="${ogDescription}" />
     <meta property="og:type" content="${ogType}" />
     <meta property="og:url" content="${canonical}" />
     <meta property="og:image" content="${ogImage}" />
+    <meta property="og:image:alt" content="${ogTitle}" />
     <meta property="og:site_name" content="Rebeldia FM" />
     <meta name="twitter:card" content="${twitterCard}" />
     <meta name="twitter:title" content="${ogTitle}" />
@@ -2135,9 +2335,11 @@ async function startServer() {
 ${jsonLd}
     </script>`;
 
-    // Remove qualquer bloco de metadados injetado anteriormente
-    output = output.replace(/<!-- Yoast Style SEO & GEO Metadata -->[\s\S]*?<\/script>/is, '');
-    output = output.replace('</head>', `${seoBlock}\n  </head>`);
+    if (/<meta[^>]*name=["']description["'][^>]*>/i.test(output)) {
+      output = output.replace(/(<meta[^>]*name=["']description["'][^>]*>)/i, `$1${seoBlock}`);
+    } else {
+      output = output.replace('</head>', `${seoBlock}\n  </head>`);
+    }
 
     return output;
   }
@@ -2162,7 +2364,8 @@ ${jsonLd}
   app.get('/api/seo/entry', async (req, res) => {
     try {
       const pagePath = String(req.query.path || '/');
-      const data = await getSeoForPath(pagePath);
+      const origin = getRequestOrigin(req);
+      const data = await getSeoForPath(pagePath, origin);
       res.json(data);
     } catch (error) {
       console.error('Error fetching seo for path:', error);
@@ -2245,17 +2448,53 @@ ${jsonLd}
       server: { middlewareMode: true },
       appType: 'spa',
     });
+    app.use(async (req, res, next) => {
+      const urlPath = (req.originalUrl || '/').split('?')[0];
+      const isStaticAsset =
+        req.method !== 'GET' ||
+        urlPath.startsWith('/api/') ||
+        urlPath.startsWith('/src/') ||
+        urlPath.startsWith('/@') ||
+        urlPath.startsWith('/node_modules/') ||
+        /\.[a-z0-9]{1,8}$/i.test(urlPath);
+      if (isStaticAsset) {
+        return next();
+      }
+      const accept = String(req.headers.accept || '');
+      const ua = String(req.headers['user-agent'] || '').toLowerCase();
+      const isBotOrHtml =
+        accept.includes('text/html') ||
+        accept.includes('*/*') ||
+        accept === '' ||
+        /whatsapp|facebookexternalhit|facebot|twitterbot|telegrambot|slackbot|discordbot|linkedinbot|googlebot|curl/i.test(ua);
+      if (!isBotOrHtml) {
+        return next();
+      }
+      try {
+        const indexPath = path.join(process.cwd(), 'index.html');
+        if (!fs.existsSync(indexPath)) return next();
+        const rawHtml = fs.readFileSync(indexPath, 'utf-8');
+        const transformedHtml = await vite.transformIndexHtml(req.originalUrl, rawHtml);
+        const origin = getRequestOrigin(req);
+        const seo = await getSeoForPath(req.path, origin);
+        const html = injectSeoMetadata(transformedHtml, seo, origin);
+        return res.status(200).set({ 'Content-Type': 'text/html' }).send(html);
+      } catch (err) {
+        return next(err);
+      }
+    });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, { index: false }));
     app.get('*', async (req, res) => {
       try {
         const indexPath = path.join(distPath, 'index.html');
         if (fs.existsSync(indexPath)) {
           const rawHtml = fs.readFileSync(indexPath, 'utf-8');
-          const seo = await getSeoForPath(req.path);
-          const html = injectSeoMetadata(rawHtml, seo);
+          const origin = getRequestOrigin(req);
+          const seo = await getSeoForPath(req.path, origin);
+          const html = injectSeoMetadata(rawHtml, seo, origin);
           return res.status(200).set({ 'Content-Type': 'text/html' }).send(html);
         }
         res.sendFile(indexPath);

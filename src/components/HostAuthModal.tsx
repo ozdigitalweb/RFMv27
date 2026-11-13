@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { HostAccount, ProgramItem, RadioStationConfig, LiveTakeover } from '../types';
 import { api } from '../utils/api';
+import { isCoringaHost, resolveHostWhatsapp } from '../utils/hostPhone';
 import { GoogleReCaptchaProvider, GoogleReCaptcha, useGoogleReCaptcha } from 'react-google-recaptcha-v3';
 
 interface HostAuthModalProps {
@@ -33,7 +34,7 @@ interface HostAuthModalProps {
   onHostLogout: () => void;
   onSelectProgram?: (program: ProgramItem) => void;
   stationConfig: RadioStationConfig;
-  onOpenTakeoverModal?: (program?: ProgramItem) => void;
+  onOpenTakeoverModal?: (program?: ProgramItem, coringaMode?: boolean) => void;
   liveTakeover?: LiveTakeover | null;
   onStopTakeover?: () => void;
 }
@@ -62,6 +63,12 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
   onStopTakeover,
 }) => {
   const [activeTab, setActiveTab] = useState<AuthTab>(currentLoggedInHost ? 'profile' : 'login');
+
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(currentLoggedInHost ? 'profile' : 'login');
+    }
+  }, [isOpen, currentLoggedInHost]);
 
   // Login form state
   const [loginIdentifier, setLoginIdentifier] = useState('');
@@ -433,19 +440,27 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
                 )}
 
                 <div className="space-y-1 flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
                     <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                       Sessão Ativa
                     </span>
                     <span className="text-xs text-zinc-400 font-mono">@{currentLoggedInHost.username}</span>
+                    {isCoringaHost(currentLoggedInHost) && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        Perfil Fixo Coringa
+                      </span>
+                    )}
                   </div>
 
                   <h3 className="text-xl font-black text-white font-display truncate">
                     {currentLoggedInHost.name}
                   </h3>
                   <p className="text-xs text-zinc-400">{currentLoggedInHost.role || 'Locutor da Rebeldia FM'}</p>
-                  <p className="text-xs text-zinc-500 truncate">{currentLoggedInHost.email}</p>
+                  <p className="text-xs text-emerald-400 font-mono flex items-center gap-1.5 pt-0.5">
+                    <Phone className="w-3 h-3 shrink-0" />
+                    <span>WhatsApp dos ouvintes: {resolveHostWhatsapp(currentLoggedInHost, stationConfig.whatsappNumber)}</span>
+                  </p>
                 </div>
               </div>
 
@@ -460,7 +475,7 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
                   </div>
                   {liveTakeover?.isActive ? (
                     <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-red-600 text-white animate-pulse">
-                      Ao Vivo no Ar
+                      {liveTakeover.isCoringa ? 'Coringa Ao Vivo' : 'Ao Vivo no Ar'}
                     </span>
                   ) : (
                     <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-zinc-800 text-zinc-400 border border-zinc-700">
@@ -471,11 +486,11 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
 
                 <p className="text-xs text-zinc-300 leading-relaxed">
                   {liveTakeover?.isActive
-                    ? `Você está no ar com "${liveTakeover.originProgramTitle}" (${liveTakeover.substituteHost}). Clique abaixo para gerenciar ou encerrar sua transmissão.`
-                    : `Deseja abrir o microfone, transmitir ao vivo ou cobrir o horário de um colega locutor? Clique no botão abaixo para entrar no ar imediatamente.`}
+                    ? `Você está no ar como ${liveTakeover.substituteHost}${liveTakeover.isCoringa ? ' (Modo Coringa)' : ''} em "${liveTakeover.coringaProgramTitle || liveTakeover.originProgramTitle}". Clique abaixo para gerenciar ou encerrar sua transmissão.`
+                    : `Use seu próprio perfil como Coringa para entrar no ar sem usar o seu programa (ex.: cobrir a folga de um colega) ou inicie a transmissão do seu programa titular.`}
                 </p>
 
-                <div className="flex items-center gap-2.5 pt-1 flex-wrap">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
                   {liveTakeover?.isActive && onStopTakeover && (
                     <button
                       type="button"
@@ -494,18 +509,30 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
                     onClick={() => {
                       onClose();
                       if (onOpenTakeoverModal) {
-                        onOpenTakeoverModal(primaryLinkedProgram || undefined);
+                        onOpenTakeoverModal(undefined, true);
                       }
                     }}
-                    className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-black transition flex items-center justify-center gap-2 cursor-pointer shadow-md ${
-                      liveTakeover?.isActive
-                        ? 'bg-zinc-800 hover:bg-zinc-700 text-white border border-zinc-600'
-                        : 'bg-amber-500 hover:bg-amber-400 text-black shadow-amber-500/20'
-                    }`}
+                    className="flex-1 py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-black transition flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-amber-500/20"
                   >
-                    <Mic className="w-4 h-4" />
-                    <span>{liveTakeover?.isActive ? 'Ajustar Configurações do Ar' : '🎙️ Entrar no Ar / Iniciar Plantão'}</span>
+                    <Sparkles className="w-4 h-4" />
+                    <span>Virar Coringa (Entrar sem seu Programa)</span>
                   </button>
+
+                  {!isCoringaHost(currentLoggedInHost) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        if (onOpenTakeoverModal) {
+                          onOpenTakeoverModal(primaryLinkedProgram || undefined, false);
+                        }
+                      }}
+                      className="flex-1 py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white border border-zinc-600 text-xs font-black transition flex items-center justify-center gap-2 cursor-pointer shadow-md"
+                    >
+                      <Mic className="w-4 h-4" />
+                      <span>{liveTakeover?.isActive ? 'Ajustar Transmissão' : 'Entrar com Meu Programa'}</span>
+                    </button>
+                  )}
                 </div>
               </div>
 

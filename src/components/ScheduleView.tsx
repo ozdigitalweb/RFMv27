@@ -26,6 +26,7 @@ import {
   formatMainSchedule,
   formatRepriseSchedule,
   getCleanDayName,
+  getSlotExecutionDistanceMinutes,
 } from '../utils/scheduleFormatter';
 
 interface ScheduleViewProps {
@@ -56,6 +57,12 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
 }) => {
   const [selectedDay, setSelectedDay] = useState<number>(-1);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNowMs(Date.now()), 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Referência e efeito de auto-scroll suave para o dia selecionado (efeito slide mobile igual ao hotsite)
   const mobileDaysContainerRef = useRef<HTMLDivElement>(null);
@@ -110,8 +117,17 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
       return matchesDay && matchesSearch;
     });
 
+    const now = new Date(nowMs);
+
     return list.sort((a, b) => {
-      // Se um dia específico estiver selecionado, ordenamos programas principais primeiro, reprises depois
+      const aLive =
+        currentLiveProgram?.id === a.id ||
+        Boolean(liveTakeover && liveTakeover.targetProgramId === a.id);
+      const bLive =
+        currentLiveProgram?.id === b.id ||
+        Boolean(liveTakeover && liveTakeover.targetProgramId === b.id);
+
+      // Se um dia específico estiver selecionado, mantém principais antes de reprises e ordena por proximidade de tempo
       if (selectedDay !== -1) {
         const isAReprise =
           Boolean(a.hasReprise) &&
@@ -125,23 +141,42 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
         if (!isAReprise && isBReprise) return -1;
         if (isAReprise && !isBReprise) return 1;
 
-        const aLive = currentLiveProgram?.id === a.id ? 1 : 0;
-        const bLive = currentLiveProgram?.id === b.id ? 1 : 0;
-        if (aLive !== bLive) return bLive - aLive;
-
         const timeA = isAReprise && a.repriseStartTime ? a.repriseStartTime : a.startTime;
+        const endA = isAReprise && a.repriseEndTime ? a.repriseEndTime : a.endTime;
         const timeB = isBReprise && b.repriseStartTime ? b.repriseStartTime : b.startTime;
+        const endB = isBReprise && b.repriseEndTime ? b.repriseEndTime : b.endTime;
+
+        const isViewingToday = selectedDay === now.getDay();
+        const rawDayA = isAReprise ? a.repriseDayOfWeek : a.dayOfWeek;
+        const rawDayB = isBReprise ? b.repriseDayOfWeek : b.dayOfWeek;
+
+        const distA = getSlotExecutionDistanceMinutes(
+          isViewingToday && rawDayA === -1 ? -1 : selectedDay,
+          timeA,
+          endA,
+          aLive,
+          now
+        );
+        const distB = getSlotExecutionDistanceMinutes(
+          isViewingToday && rawDayB === -1 ? -1 : selectedDay,
+          timeB,
+          endB,
+          bLive,
+          now
+        );
+
+        if (distA !== distB) return distA - distB;
         return timeA.localeCompare(timeB);
       }
 
-      // Visão geral de todos os dias
-      const aLive = currentLiveProgram?.id === a.id ? 1 : 0;
-      const bLive = currentLiveProgram?.id === b.id ? 1 : 0;
-      if (aLive !== bLive) return bLive - aLive;
+      // Visão geral de todos os dias: do mais próximo/ao vivo agora até o mais distante tempo de execução
+      const distA = getSlotExecutionDistanceMinutes(a.dayOfWeek, a.startTime, a.endTime, aLive, now);
+      const distB = getSlotExecutionDistanceMinutes(b.dayOfWeek, b.startTime, b.endTime, bLive, now);
 
+      if (distA !== distB) return distA - distB;
       return a.startTime.localeCompare(b.startTime);
     });
-  }, [programs, selectedDay, searchQuery, currentLiveProgram]);
+  }, [programs, selectedDay, searchQuery, currentLiveProgram, liveTakeover, nowMs]);
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-fadeIn">
@@ -208,8 +243,8 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
         </div>
       </div>
 
-      {/* Grade de Boxes Verticais em Modo Masonry */}
-      <div className="columns-1 md:columns-2 lg:columns-3 gap-6 [column-fill:_balance]">
+      {/* Grade de Boxes em Ordem Cronológica (da execução mais próxima para a mais distante) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
         {filteredPrograms.map((prog, index) => {
           const isLiveNow = currentLiveProgram?.id === prog.id;
           const hasReminder = reminders.includes(prog.id);
@@ -225,7 +260,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
             <div
               key={cardKey}
               onClick={() => onSelectProgram && onSelectProgram(prog)}
-              className={`break-inside-avoid mb-6 inline-block w-full align-top group relative rounded-3xl overflow-hidden bg-zinc-950 border transition-all duration-300 cursor-pointer shadow-xl hover:shadow-2xl hover:-translate-y-1 ${
+              className={`flex flex-col h-full w-full group relative rounded-3xl overflow-hidden bg-zinc-950 border transition-all duration-300 cursor-pointer shadow-xl hover:shadow-2xl hover:-translate-y-1 ${
                 isLiveNow
                   ? 'border-amber-500 shadow-amber-500/10'
                   : 'border-zinc-800/90 hover:border-amber-500/50'
@@ -285,7 +320,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
 
                   {/* Logo Oficial do Programa ampliado no canto superior direito */}
                   {prog.logoUrl && (
-                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-zinc-950/90 backdrop-blur-md p-1.5 sm:p-2 border border-white/20 shadow-2xl flex items-center justify-center overflow-hidden shrink-0 group-hover:border-amber-400/60 transition">
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-black/50 backdrop-blur-md p-[3px] shadow-2xl flex items-center justify-center overflow-hidden shrink-0 transition">
                       <img
                         src={prog.logoUrl}
                         alt={`Logo ${prog.title}`}
@@ -304,7 +339,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
               </div>
 
               {/* Box Content Body */}
-              <div className="p-5 flex flex-col space-y-4">
+              <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
                 <div className="space-y-3">
                   {/* Host Info Section inside Vertical Box */}
                   <div className="flex items-center gap-3.5 pb-3 border-b border-zinc-800/80">

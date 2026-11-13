@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Mic,
   Radio,
@@ -9,21 +9,20 @@ import {
   MessageCircle,
   Clock,
   Sparkles,
-  Phone,
   PowerOff,
-  Flame,
-  ArrowRight,
   ShieldCheck,
-  Headphones,
   Bot,
+  Repeat,
 } from 'lucide-react';
-import { ProgramItem, LiveTakeover, RadioStationConfig } from '../types';
+import { ProgramItem, LiveTakeover, RadioStationConfig, HostAccount } from '../types';
+import { isCoringaHost, resolveHostWhatsapp } from '../utils/hostPhone';
 
 export interface AvailableHostItem {
+  id?: string;
   host: string;
   hostRole?: string;
   avatarUrl?: string;
-  whatsappNumber?: string;
+  whatsappNumber: string;
   originProgram: string;
   isRobot?: boolean;
   programs: Array<{ id: string; title: string; startTime?: string; endTime?: string; isRebDefault?: boolean }>;
@@ -34,6 +33,9 @@ interface LiveTakeoverModalProps {
   onClose: () => void;
   currentScheduledProgram: ProgramItem | null;
   programs: ProgramItem[];
+  hostAccounts: HostAccount[];
+  currentLoggedInHost?: HostAccount | null;
+  initialCoringaMode?: boolean;
   liveTakeover: LiveTakeover | null;
   onStartTakeover: (takeover: LiveTakeover) => void;
   onStopTakeover: () => void;
@@ -45,18 +47,21 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
   onClose,
   currentScheduledProgram,
   programs,
+  hostAccounts,
+  currentLoggedInHost,
+  initialCoringaMode = false,
   liveTakeover,
   onStartTakeover,
   onStopTakeover,
   stationConfig,
 }) => {
-  // Extract unique hosts from registered programs (INCLUDING REB as official 24h robot / curator)
+  // Constrói lista de locutores priorizando o cadastro oficial de HostAccount (fonte única do WhatsApp)
   const availableHosts = useMemo<AvailableHostItem[]>(() => {
     const map = new Map<string, AvailableHostItem>();
+    const stationPhone = stationConfig.whatsappNumber || '5548991984678';
 
-    // 1. REB Programs (Default 2 fixed programs + any assigned to REB in the schedule)
+    // 1. Programas fixos do REB
     const rebPrograms: Array<{ id: string; title: string; startTime?: string; endTime?: string; isRebDefault?: boolean }> = [];
-    
     programs.forEach((p) => {
       const isReb =
         (p.host && p.host.toUpperCase() === 'REB') ||
@@ -64,21 +69,18 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
         (p.host && p.host.toLowerCase().includes('autodj')) ||
         p.id === 'reb-default-auto' ||
         p.id === 'prog-1';
-      
-      if (isReb) {
-        if (!rebPrograms.some((rp) => String(rp.id) === String(p.id) || rp.title === p.title)) {
-          rebPrograms.push({
-            id: String(p.id),
-            title: p.title,
-            startTime: p.startTime,
-            endTime: p.endTime,
-            isRebDefault: p.isRebDefault,
-          });
-        }
+
+      if (isReb && !rebPrograms.some((rp) => String(rp.id) === String(p.id) || rp.title === p.title)) {
+        rebPrograms.push({
+          id: String(p.id),
+          title: p.title,
+          startTime: p.startTime,
+          endTime: p.endTime,
+          isRebDefault: p.isRebDefault,
+        });
       }
     });
 
-    // Ensure REB has his two fixed core programs: inLINE - madrugadão Rebeldia & REB - 24hs NOAR
     if (!rebPrograms.some((rp) => rp.title.toLowerCase().includes('madrugad') || rp.title.toLowerCase().includes('inline'))) {
       rebPrograms.unshift({
         id: 'prog-1',
@@ -87,7 +89,7 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
         endTime: '06:00',
       });
     }
-    if (!rebPrograms.some((rp) => rp.title.toLowerCase().includes('24hs noar') || rp.title.toLowerCase().includes('curadoria') || rp.title.toLowerCase().includes('reb - 24hs'))) {
+    if (!rebPrograms.some((rp) => rp.title.toLowerCase().includes('24hs noar') || rp.title.toLowerCase().includes('reb - 24hs'))) {
       rebPrograms.push({
         id: 'reb-default-auto',
         title: 'REB - 24hs NOAR',
@@ -97,20 +99,52 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
       });
     }
 
-    // Register REB as the official 24h AutoDJ host
+    const rebAccount = hostAccounts.find((h) => h.id === 'host-reb');
     map.set('REB', {
-      host: 'REB',
-      hostRole: 'Robô AutoDJ • Programação Contínua 24h',
-      avatarUrl: '/reb_mascot.jpg',
-      whatsappNumber: stationConfig.whatsappNumber || '5548991984678',
+      id: 'host-reb',
+      host: rebAccount?.name || 'REB',
+      hostRole: rebAccount?.role || 'Robô AutoDJ • Programação Contínua 24h',
+      avatarUrl: rebAccount?.avatarUrl || '/reb_mascot.jpg',
+      whatsappNumber: resolveHostWhatsapp(rebAccount, stationPhone),
       originProgram: rebPrograms[0]?.title || 'REB - 24hs NOAR',
       isRobot: true,
       programs: rebPrograms,
     });
 
-    // 2. Add all other hosts from programs
+    // 2. Todos os locutores cadastrados em hostAccounts (exceto o perfil fixo Coringa, que é o modo de entrada)
+    hostAccounts.forEach((h) => {
+      if (h.id === 'host-reb' || isCoringaHost(h)) return;
+
+      const linkedProgs = programs
+        .filter(
+          (p) =>
+            p.hostAccountId === h.id ||
+            (Array.isArray(h.programIds) && h.programIds.includes(String(p.id))) ||
+            (h.programId && String(h.programId) === String(p.id)) ||
+            (p.host && p.host.toLowerCase().trim() === h.name.toLowerCase().trim())
+        )
+        .map((p) => ({
+          id: String(p.id),
+          title: p.title,
+          startTime: p.startTime,
+          endTime: p.endTime,
+        }));
+
+      map.set(h.name, {
+        id: h.id,
+        host: h.name,
+        hostRole: h.role || 'Locutor da Rebeldia FM',
+        avatarUrl: h.avatarUrl,
+        whatsappNumber: resolveHostWhatsapp(h, stationPhone),
+        originProgram: linkedProgs[0]?.title || 'Locutor da Equipe',
+        isRobot: false,
+        programs: linkedProgs,
+      });
+    });
+
+    // 3. Garante compatibilidade com eventuais locutores presentes apenas na grade
     programs.forEach((p) => {
-      if (p.host && p.host.toUpperCase() !== 'REB' && !p.host.toLowerCase().includes('autodj')) {
+      if (p.host && p.host.toUpperCase() !== 'REB' && !p.host.toLowerCase().includes('autodj') && p.host.toLowerCase() !== 'coringa') {
         const key = p.host;
         const progInfo = {
           id: String(p.id),
@@ -121,10 +155,11 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
 
         if (!map.has(key)) {
           map.set(key, {
+            id: p.hostAccountId,
             host: p.host,
             hostRole: p.hostRole || 'Locutor da Grade',
             avatarUrl: p.avatarUrl,
-            whatsappNumber: p.whatsappNumber || stationConfig.whatsappNumber,
+            whatsappNumber: stationPhone,
             originProgram: p.title,
             isRobot: false,
             programs: [progInfo],
@@ -139,41 +174,75 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
     });
 
     return Array.from(map.values());
-  }, [programs, stationConfig.whatsappNumber]);
+  }, [programs, hostAccounts, stationConfig.whatsappNumber]);
 
-  // Form state
-  const [selectedHostPreset, setSelectedHostPreset] = useState<string>(() => {
-    if (currentScheduledProgram?.host && currentScheduledProgram.host.toUpperCase() === 'REB') {
-      return 'REB';
-    }
-    return availableHosts[0]?.host || 'REB';
-  });
-
-  const selectedHostData = useMemo(() => {
-    return availableHosts.find((h) => h.host === selectedHostPreset) || availableHosts[0] || null;
-  }, [availableHosts, selectedHostPreset]);
-
-  const [selectedProgramTitle, setSelectedProgramTitle] = useState<string>(() => {
-    if (currentScheduledProgram?.title) return currentScheduledProgram.title;
-    return availableHosts[0]?.programs[0]?.title || 'REB - 24hs NOAR';
-  });
-
-  const [selectedProgramId, setSelectedProgramId] = useState<string>(() => {
-    if (currentScheduledProgram?.id) return String(currentScheduledProgram.id);
-    return availableHosts[0]?.programs[0]?.id || 'reb-default-auto';
-  });
-
+  const [isCoringaMode, setIsCoringaMode] = useState<boolean>(initialCoringaMode);
+  const [coverScheduleProgram, setCoverScheduleProgram] = useState<boolean>(true);
+  const [coringaProgramTitle, setCoringaProgramTitle] = useState<string>('Plantão Coringa');
+  const [selectedHostPreset, setSelectedHostPreset] = useState<string>('REB');
+  const [selectedProgramTitle, setSelectedProgramTitle] = useState<string>('REB - 24hs NOAR');
+  const [selectedProgramId, setSelectedProgramId] = useState<string>('reb-default-auto');
   const [customHostName, setCustomHostName] = useState('');
   const [customHostRole, setCustomHostRole] = useState('Locutor Online • Apresentação Especial');
   const [customAvatarUrl, setCustomAvatarUrl] = useState('');
   const [customWhatsapp, setCustomWhatsapp] = useState(stationConfig.whatsappNumber || '5548991984678');
   const [takeoverNotes, setTakeoverNotes] = useState('');
   const [isCustomMode, setIsCustomMode] = useState(false);
+  const [formError, setFormError] = useState('');
 
-  // Handle Preset Host Selection
+  // Sincroniza estado ao abrir o modal (priorizando o perfil do locutor logado no Modo Coringa)
+  useEffect(() => {
+    if (!isOpen) return;
+    setFormError('');
+    const loggedIsCoringa = isCoringaHost(currentLoggedInHost);
+    const shouldStartCoringa = Boolean(initialCoringaMode || loggedIsCoringa);
+    setIsCoringaMode(shouldStartCoringa);
+    setCoverScheduleProgram(Boolean(currentScheduledProgram && !currentScheduledProgram.isRebDefault));
+    setCoringaProgramTitle('Plantão Coringa');
+    setIsCustomMode(false);
+    setTakeoverNotes('');
+
+    let defaultHostItem: AvailableHostItem | undefined;
+    if (currentLoggedInHost && !loggedIsCoringa) {
+      defaultHostItem = availableHosts.find(
+        (h) => h.id === currentLoggedInHost.id || h.host.toLowerCase() === currentLoggedInHost.name.toLowerCase()
+      );
+    }
+    if (!defaultHostItem && shouldStartCoringa) {
+      defaultHostItem = availableHosts.find((h) => !h.isRobot) || availableHosts[0];
+    }
+    if (!defaultHostItem && currentScheduledProgram?.host) {
+      defaultHostItem = availableHosts.find((h) => h.host.toLowerCase() === currentScheduledProgram.host.toLowerCase());
+    }
+    if (!defaultHostItem) {
+      defaultHostItem = availableHosts[0];
+    }
+
+    if (defaultHostItem) {
+      setSelectedHostPreset(defaultHostItem.host);
+      setCustomHostName(defaultHostItem.host);
+      setCustomHostRole(defaultHostItem.hostRole || 'Locutor Online • Apresentação Especial');
+      setCustomAvatarUrl(defaultHostItem.avatarUrl || '');
+      setCustomWhatsapp(defaultHostItem.whatsappNumber || stationConfig.whatsappNumber || '5548991984678');
+      if (defaultHostItem.programs.length > 0) {
+        const chosen = defaultHostItem.programs[0];
+        setSelectedProgramTitle(chosen.title);
+        setSelectedProgramId(chosen.id);
+      } else {
+        setSelectedProgramTitle(currentScheduledProgram?.title || 'REB - 24hs NOAR');
+        setSelectedProgramId(currentScheduledProgram?.id || 'reb-default-auto');
+      }
+    }
+  }, [isOpen, initialCoringaMode, currentLoggedInHost, currentScheduledProgram, availableHosts, stationConfig.whatsappNumber]);
+
+  const selectedHostData = useMemo(() => {
+    return availableHosts.find((h) => h.host === selectedHostPreset) || availableHosts[0] || null;
+  }, [availableHosts, selectedHostPreset]);
+
   const handleSelectHostPreset = (hostName: string) => {
     setSelectedHostPreset(hostName);
     setIsCustomMode(false);
+    setFormError('');
     const found = availableHosts.find((h) => h.host === hostName);
     if (found) {
       setCustomHostName(found.host);
@@ -194,20 +263,27 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
   if (!isOpen) return null;
 
   const activeSubstitute = liveTakeover?.isActive ? liveTakeover : null;
+  const selectableHosts = isCoringaMode ? availableHosts.filter((h) => !h.isRobot) : availableHosts;
+  const activePreviewPhone = isCustomMode
+    ? customWhatsapp.trim() || stationConfig.whatsappNumber || '5548991984678'
+    : selectedHostData?.whatsappNumber || stationConfig.whatsappNumber || '5548991984678';
 
   const handleLaunchTakeover = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError('');
 
+    let finalHostId: string | undefined;
     let finalHost = customHostName.trim();
     let finalRole = customHostRole.trim();
     let finalAvatar = customAvatarUrl.trim();
     let finalWhatsapp = customWhatsapp.trim();
     let originProg = selectedProgramTitle || '';
-    let targetProgId = selectedProgramId || currentScheduledProgram?.id || 'reb-default-auto';
+    let targetProgId = currentScheduledProgram?.id || selectedProgramId || 'reb-default-auto';
 
     if (!isCustomMode) {
       const found = availableHosts.find((h) => h.host === selectedHostPreset);
       if (found) {
+        finalHostId = found.id;
         finalHost = found.host;
         finalRole = found.hostRole || 'Locutor Online • Apresentação Especial';
         finalAvatar = found.avatarUrl || '';
@@ -217,21 +293,53 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
     }
 
     if (!finalHost) {
-      alert('Por favor, selecione ou informe o nome do locutor que está assumindo o microfone.');
+      setFormError('Por favor, selecione ou informe o nome do locutor que está assumindo o microfone.');
       return;
     }
 
     const isRobotHost = finalHost.toLowerCase() === 'reb' || finalHost.toLowerCase().includes('autodj');
 
+    if (isCoringaMode) {
+      const cleanCoringaTitle = coringaProgramTitle.trim() || 'Plantão Coringa';
+      const coringaRole = finalRole.toLowerCase().includes('coringa')
+        ? finalRole
+        : `${finalRole || 'Locutor'} • Modo Coringa`;
+
+      const newTakeover: LiveTakeover = {
+        isActive: true,
+        substituteHost: finalHost,
+        substituteHostId: finalHostId,
+        substituteHostRole: coringaRole,
+        substituteAvatarUrl: finalAvatar || undefined,
+        substituteWhatsapp: finalWhatsapp || stationConfig.whatsappNumber || '5548991984678',
+        originProgramTitle: coverScheduleProgram
+          ? currentScheduledProgram?.title || cleanCoringaTitle
+          : cleanCoringaTitle,
+        targetProgramId: coverScheduleProgram ? targetProgId : undefined,
+        takeoverType: 'coringa',
+        isCoringa: true,
+        coverScheduleProgram,
+        coringaProgramTitle: coverScheduleProgram ? undefined : cleanCoringaTitle,
+        notes: takeoverNotes.trim() || undefined,
+        startedAt: Date.now(),
+      };
+
+      onStartTakeover(newTakeover);
+      onClose();
+      return;
+    }
+
     const newTakeover: LiveTakeover = {
       isActive: true,
       substituteHost: finalHost,
+      substituteHostId: finalHostId,
       substituteHostRole: finalRole || (isRobotHost ? 'Robô AutoDJ • 24h' : 'Locutor Online • Apresentação Especial'),
       substituteAvatarUrl: finalAvatar || undefined,
       substituteWhatsapp: finalWhatsapp || stationConfig.whatsappNumber || '5548991984678',
       originProgramTitle: originProg || currentScheduledProgram?.title || 'REB - 24hs NOAR',
       targetProgramId: targetProgId,
-      takeoverType: isRobotHost ? 'live_dj_session' : (currentScheduledProgram?.host === 'REB' ? 'live_dj_session' : 'covering_colleague'),
+      takeoverType: isRobotHost ? 'live_dj_session' : currentScheduledProgram?.host === 'REB' ? 'live_dj_session' : 'covering_colleague',
+      isCoringa: false,
       notes: takeoverNotes.trim() || undefined,
       startedAt: Date.now(),
     };
@@ -249,17 +357,19 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
         {/* Header */}
         <div className="p-5 sm:p-6 bg-zinc-950 border-b border-white/10 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-white text-black flex items-center justify-center font-black shadow-lg">
-              <Mic className="w-5 h-5" />
+            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black shadow-lg ${
+              isCoringaMode ? 'bg-amber-500 text-black' : 'bg-white text-black'
+            }`}>
+              {isCoringaMode ? <Sparkles className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-lg font-black text-white font-display">
-                  Estúdio Ao Vivo • Assumir Microfone
+                  {isCoringaMode ? 'Modo Coringa • Entrar no Ar' : 'Estúdio Ao Vivo • Assumir Microfone'}
                 </h3>
                 {activeSubstitute ? (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-red-600 text-white animate-pulse">
-                    SUBSTITUIÇÃO ATIVA
+                    {activeSubstitute.isCoringa ? 'CORINGA ATIVO' : 'SUBSTITUIÇÃO ATIVA'}
                   </span>
                 ) : (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
@@ -268,7 +378,9 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
                 )}
               </div>
               <p className="text-xs text-zinc-400">
-                Cumprir horário de colega ou entrar ao vivo durante a curadoria REB
+                {isCoringaMode
+                  ? 'Use o perfil do locutor (nome, foto e WhatsApp) para entrar no ar sem usar seu programa'
+                  : 'Cumprir horário de colega ou entrar ao vivo durante a curadoria REB'}
               </p>
             </div>
           </div>
@@ -280,7 +392,36 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
           </button>
         </div>
 
-        <div className="p-5 sm:p-6 space-y-6 max-h-[75vh] overflow-y-auto">
+        <div className="p-5 sm:p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+          {/* Seletor de Modo: Coringa vs Substituição Padrão */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-1.5 rounded-2xl bg-zinc-900/90 border border-white/10">
+            <button
+              type="button"
+              onClick={() => setIsCoringaMode(true)}
+              className={`py-2.5 px-3.5 rounded-xl text-xs font-black transition flex items-center justify-center gap-2 cursor-pointer ${
+                isCoringaMode
+                  ? 'bg-amber-500 text-black shadow-md'
+                  : 'text-zinc-300 hover:text-white hover:bg-zinc-800/70'
+              }`}
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>Modo Coringa (Sem Programa)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsCoringaMode(false)}
+              className={`py-2.5 px-3.5 rounded-xl text-xs font-black transition flex items-center justify-center gap-2 cursor-pointer ${
+                !isCoringaMode
+                  ? 'bg-white text-black shadow-md'
+                  : 'text-zinc-300 hover:text-white hover:bg-zinc-800/70'
+              }`}
+            >
+              <Repeat className="w-4 h-4" />
+              <span>Substituição / Com Programa</span>
+            </button>
+          </div>
+
           {/* Status Atual do Horário */}
           <div className="p-4 rounded-2xl bg-zinc-900/90 border border-white/10 space-y-3">
             <div className="flex items-center justify-between text-xs">
@@ -288,7 +429,7 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
                 <Clock className="w-3.5 h-3.5 text-white" />
                 Dono do Horário Atual na Grade
               </span>
-              <span className="font-mono text-zinc-400">
+              <span className="font-mono text-zinc-400 tabular-nums">
                 {currentScheduledProgram ? `${currentScheduledProgram.startTime} - ${currentScheduledProgram.endTime}` : '24h'}
               </span>
             </div>
@@ -321,17 +462,17 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
             </div>
           </div>
 
-          {/* Se JÁ houver substituição ativa */}
+          {/* Se JÁ houver substituição / Coringa ativo */}
           {activeSubstitute && (
             <div className="p-4 rounded-2xl bg-gradient-to-r from-red-950/60 to-zinc-900 border border-red-500/40 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
                   <span className="text-xs font-black text-red-300 uppercase tracking-wider">
-                    No Ar no Momento (Locutor Online)
+                    {activeSubstitute.isCoringa ? 'Perfil Coringa No Ar' : 'No Ar no Momento (Locutor Online)'}
                   </span>
                 </div>
-                <span className="text-[11px] font-mono text-zinc-400">
+                <span className="text-[11px] font-mono text-zinc-400 tabular-nums">
                   Iniciado há {Math.max(1, Math.round((Date.now() - activeSubstitute.startedAt) / 60000))} min
                 </span>
               </div>
@@ -358,7 +499,7 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
                   <p className="text-[11px] text-zinc-400 flex items-center gap-1 mt-0.5">
                     <MessageCircle className="w-3 h-3 text-emerald-400" />
                     WhatsApp ativo para pedidos:{' '}
-                    <strong className="text-emerald-300 font-mono">
+                    <strong className="text-emerald-300 font-mono tabular-nums">
                       {activeSubstitute.substituteWhatsapp || stationConfig.whatsappNumber}
                     </strong>
                   </p>
@@ -379,22 +520,29 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
                 className="w-full py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-black transition flex items-center justify-center gap-2 shadow-lg cursor-pointer"
               >
                 <PowerOff className="w-4 h-4" />
-                <span>Encerrar Substituição e Devolver ao Titular ({currentScheduledProgram?.host || 'REB'})</span>
+                <span>Encerrar Plantão e Devolver ao Titular ({currentScheduledProgram?.host || 'REB'})</span>
               </button>
+            </div>
+          )}
+
+          {formError && (
+            <div className="p-3 rounded-xl bg-red-950/60 border border-red-500/40 text-red-200 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+              <span>{formError}</span>
             </div>
           )}
 
           {/* Formulário para Assumir Microfone / Entrar no Ar */}
           <form onSubmit={handleLaunchTakeover} className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <label className="text-xs font-bold text-white flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5 text-white" />
-                Quem vai assumir o microfone?
+                <User className="w-3.5 h-3.5 text-amber-400" />
+                {isCoringaMode ? 'Qual perfil de locutor vai virar Coringa?' : 'Quem vai assumir o microfone?'}
               </label>
               <button
                 type="button"
                 onClick={() => setIsCustomMode(!isCustomMode)}
-                className="text-[11px] text-zinc-400 hover:text-white underline"
+                className="text-[11px] text-zinc-400 hover:text-white underline cursor-pointer"
               >
                 {isCustomMode ? '← Escolher da lista de locutores' : '+ Digitar locutor convidado / outro'}
               </button>
@@ -403,15 +551,22 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
             {!isCustomMode ? (
               <div className="space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {availableHosts.map((h) => {
+                  {selectableHosts.map((h) => {
                     const isSelected = selectedHostPreset === h.host;
+                    const isLoggedMe =
+                      currentLoggedInHost &&
+                      !isCoringaHost(currentLoggedInHost) &&
+                      (currentLoggedInHost.id === h.id || currentLoggedInHost.name.toLowerCase() === h.host.toLowerCase());
+
                     return (
                       <div
-                        key={h.host}
+                        key={h.id || h.host}
                         onClick={() => handleSelectHostPreset(h.host)}
                         className={`p-3 rounded-2xl border transition cursor-pointer flex items-center gap-3 ${
                           isSelected
-                            ? 'bg-white text-black border-white shadow-md'
+                            ? isCoringaMode
+                              ? 'bg-amber-500 text-black border-amber-400 shadow-md'
+                              : 'bg-white text-black border-white shadow-md'
                             : 'bg-zinc-900/80 hover:bg-zinc-800/80 border-white/10 text-white'
                         }`}
                       >
@@ -435,6 +590,17 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <h5 className="text-xs font-black truncate">{h.host}</h5>
+                            {isLoggedMe && (
+                              <span
+                                className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold ${
+                                  isSelected
+                                    ? 'bg-black/15 text-black border border-black/20'
+                                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                }`}
+                              >
+                                Você
+                              </span>
+                            )}
                             {h.isRobot && (
                               <span
                                 className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold flex items-center gap-1 ${
@@ -448,8 +614,8 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
                               </span>
                             )}
                           </div>
-                          <p className={`text-[10px] truncate ${isSelected ? 'text-zinc-700' : 'text-zinc-400'}`}>
-                            {h.originProgram}
+                          <p className={`text-[10px] font-mono truncate tabular-nums ${isSelected ? 'text-black/80' : 'text-emerald-400'}`}>
+                            WhatsApp: {h.whatsappNumber}
                           </p>
                         </div>
                         {isSelected && <Check className="w-4 h-4 text-black shrink-0" />}
@@ -458,60 +624,126 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
                   })}
                 </div>
 
-                {/* Seleção do Programa a Transmitir (ex: REB tem inLINE - madrugadão Rebeldia & REB - 24hs NOAR) */}
-                {selectedHostData && selectedHostData.programs && selectedHostData.programs.length > 0 && (
-                  <div className="p-3.5 rounded-2xl bg-zinc-900/90 border border-white/10 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-bold text-white flex items-center gap-1.5">
-                        <Radio className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Programa que vai ao ar:</span>
-                      </label>
-                      <span className="text-[10px] text-zinc-400 font-mono">
-                        {selectedHostData.programs.length}{' '}
-                        {selectedHostData.programs.length === 1 ? 'programa disponível' : 'programas cadastrados'}
+                {/* Opções do Modo Coringa (Sem usar o programa próprio do locutor) */}
+                {isCoringaMode ? (
+                  <div className="p-4 rounded-2xl bg-amber-950/20 border border-amber-500/30 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        Como exibir esta entrada Coringa no ar?
                       </span>
+                      <span className="text-[10px] text-zinc-400 font-mono">Sem usar seu programa fixo</span>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {selectedHostData.programs.map((prog) => {
-                        const isChosen = selectedProgramTitle === prog.title;
-                        return (
-                          <button
-                            key={prog.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedProgramTitle(prog.title);
-                              setSelectedProgramId(prog.id);
-                            }}
-                            className={`p-2.5 rounded-xl border text-left transition flex items-center justify-between gap-2 cursor-pointer ${
-                              isChosen
-                                ? 'bg-amber-500/20 border-amber-400 text-white shadow-sm ring-1 ring-amber-400/40'
-                                : 'bg-zinc-950 border-white/5 text-zinc-300 hover:border-white/20'
-                            }`}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="text-xs font-bold truncate text-white flex items-center gap-1.5">
-                                <span>{prog.title}</span>
-                                {prog.isRebDefault && (
-                                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-300 font-bold font-mono">
-                                    24h
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-[10px] text-zinc-400 font-mono mt-0.5">
-                                {prog.startTime && prog.endTime ? `${prog.startTime} - ${prog.endTime}` : 'Programação Oficial'}
-                              </div>
-                            </div>
-                            {isChosen ? (
-                              <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                            ) : (
-                              <span className="w-3.5 h-3.5 rounded-full border border-zinc-700 shrink-0" />
-                            )}
-                          </button>
-                        );
-                      })}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setCoverScheduleProgram(true)}
+                        className={`p-3 rounded-xl border text-left transition cursor-pointer space-y-1 ${
+                          coverScheduleProgram
+                            ? 'bg-amber-500/20 border-amber-400 text-white ring-1 ring-amber-400/40'
+                            : 'bg-zinc-950 border-white/10 text-zinc-400 hover:border-white/20'
+                        }`}
+                      >
+                        <div className="text-xs font-bold text-white flex items-center justify-between">
+                          <span>Cobrir Folga do Horário</span>
+                          {coverScheduleProgram && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                        </div>
+                        <p className="text-[11px] text-zinc-400 leading-snug">
+                          Mantém "{currentScheduledProgram?.title || 'Programa da Grade'}" no ar, trocando o apresentador e o WhatsApp para você.
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setCoverScheduleProgram(false)}
+                        className={`p-3 rounded-xl border text-left transition cursor-pointer space-y-1 ${
+                          !coverScheduleProgram
+                            ? 'bg-amber-500/20 border-amber-400 text-white ring-1 ring-amber-400/40'
+                            : 'bg-zinc-950 border-white/10 text-zinc-400 hover:border-white/20'
+                        }`}
+                      >
+                        <div className="text-xs font-bold text-white flex items-center justify-between">
+                          <span>Plantão Coringa Avulso</span>
+                          {!coverScheduleProgram && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                        </div>
+                        <p className="text-[11px] text-zinc-400 leading-snug">
+                          Entra com título "Plantão Coringa" usando seu nome, foto e WhatsApp, sem vínculo com nenhum programa.
+                        </p>
+                      </button>
                     </div>
+
+                    {!coverScheduleProgram && (
+                      <div className="space-y-1 pt-1">
+                        <label className="text-[11px] font-bold text-zinc-300">
+                          Título do Plantão Coringa no Player
+                        </label>
+                        <input
+                          type="text"
+                          value={coringaProgramTitle}
+                          onChange={(e) => setCoringaProgramTitle(e.target.value)}
+                          placeholder="Plantão Coringa"
+                          className="w-full bg-zinc-950 border border-white/15 rounded-xl px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-amber-400"
+                        />
+                      </div>
+                    )}
                   </div>
+                ) : (
+                  /* Seleção do Programa a Transmitir no modo padrão */
+                  selectedHostData && selectedHostData.programs && selectedHostData.programs.length > 0 && (
+                    <div className="p-3.5 rounded-2xl bg-zinc-900/90 border border-white/10 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <Radio className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Programa que vai ao ar:</span>
+                        </label>
+                        <span className="text-[10px] text-zinc-400 font-mono">
+                          {selectedHostData.programs.length}{' '}
+                          {selectedHostData.programs.length === 1 ? 'programa disponível' : 'programas cadastrados'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {selectedHostData.programs.map((prog) => {
+                          const isChosen = selectedProgramTitle === prog.title;
+                          return (
+                            <button
+                              key={prog.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedProgramTitle(prog.title);
+                                setSelectedProgramId(prog.id);
+                              }}
+                              className={`p-2.5 rounded-xl border text-left transition flex items-center justify-between gap-2 cursor-pointer ${
+                                isChosen
+                                  ? 'bg-amber-500/20 border-amber-400 text-white shadow-sm ring-1 ring-amber-400/40'
+                                  : 'bg-zinc-950 border-white/5 text-zinc-300 hover:border-white/20'
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-bold truncate text-white flex items-center gap-1.5">
+                                  <span>{prog.title}</span>
+                                  {prog.isRebDefault && (
+                                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-300 font-bold font-mono">
+                                      24h
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-zinc-400 font-mono mt-0.5 tabular-nums">
+                                  {prog.startTime && prog.endTime ? `${prog.startTime} - ${prog.endTime}` : 'Programação Oficial'}
+                                </div>
+                              </div>
+                              {isChosen ? (
+                                <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                              ) : (
+                                <span className="w-3.5 h-3.5 rounded-full border border-zinc-700 shrink-0" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )
                 )}
               </div>
             ) : (
@@ -541,13 +773,13 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-zinc-300">WhatsApp Direto</label>
+                    <label className="text-[11px] font-bold text-zinc-300">WhatsApp do Locutor</label>
                     <input
                       type="text"
                       value={customWhatsapp}
                       onChange={(e) => setCustomWhatsapp(e.target.value)}
                       placeholder="Ex: 5548991984678"
-                      className="w-full bg-zinc-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-white"
+                      className="w-full bg-zinc-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-white font-mono"
                     />
                   </div>
                 </div>
@@ -575,7 +807,7 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
                 type="text"
                 value={takeoverNotes}
                 onChange={(e) => setTakeoverNotes(e.target.value)}
-                placeholder={`Ex: Cobrindo a bancada hoje no ${currentScheduledProgram?.title || 'estúdio'}, mandem seus pedidos!`}
+                placeholder={`Ex: Cobrindo a folga do colega no ${currentScheduledProgram?.title || 'estúdio'}, mandem seus pedidos!`}
                 className="w-full bg-zinc-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-white"
               />
             </div>
@@ -586,8 +818,16 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
                 Como a rádio exibirá esta transmissão:
               </p>
-              <p className="text-[11px]">
-                O programa permanecerá como <strong className="text-zinc-200">"{currentScheduledProgram?.title || 'REB - 24hs NOAR'}"</strong> (dono do horário na grade), mas a apresentação e o WhatsApp de pedidos serão alterados para o colega que assumiu o microfone.
+              <p className="text-[11px] leading-relaxed">
+                {isCoringaMode && !coverScheduleProgram ? (
+                  <>
+                    A rádio exibirá <strong className="text-amber-300">"{coringaProgramTitle.trim() || 'Plantão Coringa'}"</strong> no ar sem alterar ou usar seu programa titular, direcionando os ouvintes para o WhatsApp do locutor (<strong className="text-emerald-300 font-mono tabular-nums">{activePreviewPhone}</strong>).
+                  </>
+                ) : (
+                  <>
+                    O programa permanecerá como <strong className="text-zinc-200">"{currentScheduledProgram?.title || 'REB - 24hs NOAR'}"</strong> (dono do horário na grade), mas a apresentação e o WhatsApp dos ouvintes serão alterados automaticamente para o telefone do locutor no ar (<strong className="text-emerald-300 font-mono tabular-nums">{activePreviewPhone}</strong>).
+                  </>
+                )}
               </p>
             </div>
 
@@ -596,16 +836,20 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-bold transition"
+                className="px-4 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-bold transition cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
-                className="px-6 py-2.5 rounded-xl bg-white hover:bg-zinc-200 text-black text-xs font-black transition flex items-center gap-2 shadow-xl cursor-pointer"
+                className={`px-6 py-2.5 rounded-xl text-black text-xs font-black transition flex items-center gap-2 shadow-xl cursor-pointer ${
+                  isCoringaMode
+                    ? 'bg-amber-500 hover:bg-amber-400 shadow-amber-500/20'
+                    : 'bg-white hover:bg-zinc-200'
+                }`}
               >
-                <Mic className="w-4 h-4" />
-                <span>ENTRAR NO AR AGORA</span>
+                {isCoringaMode ? <Sparkles className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                <span>{isCoringaMode ? 'ENTRAR NO AR COMO CORINGA' : 'ENTRAR NO AR AGORA'}</span>
               </button>
             </div>
           </form>
