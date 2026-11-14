@@ -433,11 +433,11 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-[10px] sm:p-[30px] bg-black/80 backdrop-blur-md overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-stretch justify-stretch p-0 bg-zinc-950 overflow-hidden"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-5xl bg-zinc-950 border border-white/20 rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[92vh] sm:h-[88vh] max-h-[860px]"
+        className="relative w-full h-[100dvh] max-w-none bg-zinc-950 rounded-none border-0 overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Cover / Header Banner - Otimizado para mobile com logo no topo e botão abaixo */}
