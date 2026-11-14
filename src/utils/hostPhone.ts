@@ -1,6 +1,22 @@
-import { HostAccount, LiveTakeover, ProgramItem } from '../types';
+import { HostAccount, LiveTakeover, ProgramItem, ScheduleSwapRecord } from '../types';
+import {
+  DEFAULT_STATION_PHONE,
+  formatPhoneDisplay,
+  getCanonicalPhoneKey,
+  isValidCellPhone,
+  normalizePhoneDigits,
+  phonesMatch,
+} from './phoneMatch';
 
-export const DEFAULT_STATION_WHATSAPP = '5548991984678';
+export {
+  formatPhoneDisplay,
+  getCanonicalPhoneKey,
+  isValidCellPhone,
+  normalizePhoneDigits,
+  phonesMatch,
+};
+
+export const DEFAULT_STATION_WHATSAPP = DEFAULT_STATION_PHONE;
 export const REB_HOST_ID = 'host-reb';
 export const CORINGA_HOST_ID = 'host-coringa';
 
@@ -98,6 +114,144 @@ export function findLinkedHostAccount(
   }
 
   return undefined;
+}
+
+/**
+ * Verifica se uma conta de locutor é titular/responsável por um programa específico.
+ */
+export function isHostOwnerOfProgram(
+  host: Partial<HostAccount> | null | undefined,
+  program: Partial<ProgramItem> | null | undefined
+): boolean {
+  if (!host || !program) return false;
+  if (isCoringaHost(host)) return false;
+
+  const progIdStr = program.id !== undefined && program.id !== null ? String(program.id) : '';
+
+  if (program.hostAccountId && host.id && String(program.hostAccountId) === String(host.id)) {
+    return true;
+  }
+  if (progIdStr && Array.isArray(host.programIds) && host.programIds.map(String).includes(progIdStr)) {
+    return true;
+  }
+  if (progIdStr && host.programId && String(host.programId) === progIdStr) {
+    return true;
+  }
+
+  const hostName = (host.name || '').toLowerCase().trim();
+  const hostUser = (host.username || '').toLowerCase().trim();
+  const progHost = (program.host || '').toLowerCase().trim();
+
+  if (!progHost) return false;
+  if (hostName && (progHost === hostName || progHost.includes(hostName) || hostName.includes(progHost))) {
+    return true;
+  }
+  if (hostUser && progHost === hostUser) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Identifica telefones duplicados entre locutores ativos (ex.: contas antigas ainda com o número genérico da rádio).
+ */
+export function findDuplicateHostPhones(accounts: HostAccount[]): Record<string, HostAccount[]> {
+  const byPhone = new Map<string, HostAccount[]>();
+  accounts.forEach((acc) => {
+    if (acc.status === 'pending' || isCoringaHost(acc)) return;
+    const key = getCanonicalPhoneKey(acc.whatsapp);
+    if (!key) return;
+    const existing = byPhone.get(key) || [];
+    existing.push(acc);
+    byPhone.set(key, existing);
+  });
+
+  const duplicates: Record<string, HostAccount[]> = {};
+  byPhone.forEach((list, key) => {
+    if (list.length > 1) {
+      duplicates[key] = list;
+    }
+  });
+  return duplicates;
+}
+
+/**
+ * Retorna data local no formato YYYY-MM-DD para verificação de trocas pontuais de 1 dia.
+ */
+export function getLocalTodayYmd(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Aplica trocas pontuais ativas para a data de hoje sobre os programas da grade,
+ * permutando exclusivamente a janela de horário (dia, início, fim e rótulo) entre os dois programas
+ * e preservando o locutor e celular de quem realmente entra naquela faixa horária.
+ */
+export function applyEffectiveSwapsToPrograms(
+  programs: ProgramItem[],
+  swaps: ScheduleSwapRecord[],
+  todayYmd: string = getLocalTodayYmd()
+): ProgramItem[] {
+  if (!Array.isArray(programs) || programs.length === 0) return programs;
+  if (!Array.isArray(swaps) || swaps.length === 0) return programs;
+
+  const activeToday = swaps
+    .filter((s) => s.type === 'one_time' && s.status === 'active' && s.targetDate === todayYmd)
+    .sort((a, b) => a.createdAt - b.createdAt);
+
+  if (activeToday.length === 0) return programs;
+
+  const result = programs.map((p) => ({ ...p }));
+
+  for (const swap of activeToday) {
+    const idxA = result.findIndex((p) => String(p.id) === String(swap.sourceProgramId));
+    const idxB = result.findIndex((p) => String(p.id) === String(swap.targetProgramId));
+    if (idxA === -1 || idxB === -1 || idxA === idxB) continue;
+
+    const progA = result[idxA];
+    const progB = result[idxB];
+
+    const slotA = {
+      dayOfWeek: progA.dayOfWeek,
+      startTime: progA.startTime,
+      endTime: progA.endTime,
+      daysLabel: progA.daysLabel,
+    };
+    const slotB = {
+      dayOfWeek: progB.dayOfWeek,
+      startTime: progB.startTime,
+      endTime: progB.endTime,
+      daysLabel: progB.daysLabel,
+    };
+
+    result[idxA] = {
+      ...progA,
+      dayOfWeek: slotB.dayOfWeek,
+      startTime: slotB.startTime,
+      endTime: slotB.endTime,
+      daysLabel: `Troca Pontual Hoje (${slotB.startTime}–${slotB.endTime})`,
+      swappedNotice: `Horário trocado hoje com ${progB.title}`,
+      swappedWithTitle: progB.title,
+      swappedDate: todayYmd,
+    };
+
+    result[idxB] = {
+      ...progB,
+      dayOfWeek: slotA.dayOfWeek,
+      startTime: slotA.startTime,
+      endTime: slotA.endTime,
+      daysLabel: `Troca Pontual Hoje (${slotA.startTime}–${slotA.endTime})`,
+      swappedNotice: `Horário trocado hoje com ${progA.title}`,
+      swappedWithTitle: progA.title,
+      swappedDate: todayYmd,
+    };
+  }
+
+  return result;
 }
 
 /**

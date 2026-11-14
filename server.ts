@@ -11,6 +11,12 @@ import { desc, eq, sql } from 'drizzle-orm';
 import { OFFICIAL_HOSTS, OFFICIAL_SCHEDULE_ITEMS, getProgramSeedKey } from './src/data/officialData.ts';
 import { findProgramBySlug, getProgramLogoSrc, getProgramSlug } from './src/utils/slug.ts';
 import { runMigrations } from './server/migrations/migrator.ts';
+import {
+  DEFAULT_STATION_PHONE,
+  getCanonicalPhoneKey,
+  isValidCellPhone,
+  phonesMatch,
+} from './src/utils/phoneMatch.ts';
 
 // Password hashing (scrypt) & verification
 function hashPassword(password: string): string {
@@ -121,11 +127,62 @@ async function startServer() {
   const ADMIN_PASS = process.env.ADMIN_PASSWORD || 'rebeldia2026';
     const RECAPTCHA_SECRET_KEY = process.env.RECAPTCHA_SECRET_KEY || '';
     const activeAdminTokens = new Set<string>();
+    const HOST_TOKEN_SECRET = process.env.SESSION_SECRET || ADMIN_PASS || 'rebeldia_host_secret_2026';
 
-    // Helper to verify reCAPTCHA v3 token
-    const verifyRecaptcha = async (token: string, action: string): Promise<{ success: boolean; score?: number; error?: string }> => {
-      if (!RECAPTCHA_SECRET_KEY || !token) {
-        return { success: false, error: 'reCAPTCHA não configurado ou token ausente' };
+    const createHostToken = (hostId: string): string => {
+      const payload = Buffer.from(JSON.stringify({ hostId, iat: Date.now() })).toString('base64url');
+      const sig = crypto.createHmac('sha256', HOST_TOKEN_SECRET).update(payload).digest('base64url');
+      return `rebeldia_host.${payload}.${sig}`;
+    };
+
+    const verifyHostToken = (token?: string | null): { hostId: string } | null => {
+      if (!token || !token.startsWith('rebeldia_host.')) return null;
+      const parts = token.split('.');
+      if (parts.length !== 3) return null;
+      const [, payload, sig] = parts;
+      try {
+        const expected = crypto.createHmac('sha256', HOST_TOKEN_SECRET).update(payload).digest('base64url');
+        if (sig.length !== expected.length) return null;
+        if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+        const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+        if (!parsed?.hostId) return null;
+        return { hostId: String(parsed.hostId) };
+      } catch {
+        return null;
+      }
+    };
+
+    const extractHostTokenFromRequest = (req: express.Request): string | null => {
+      const headerToken = (req.headers['x-host-token'] as string) || '';
+      if (headerToken.startsWith('rebeldia_host.')) return headerToken.trim();
+      const authHeader = req.headers.authorization || '';
+      if (authHeader.startsWith('Bearer ')) {
+        const bearer = authHeader.slice(7).trim();
+        if (bearer.startsWith('rebeldia_host.')) return bearer;
+      }
+      return null;
+    };
+
+    const isAdminAuthenticatedRequest = (req: express.Request): boolean => {
+      const authHeader = req.headers.authorization;
+      const adminTokenHeader = req.headers['x-admin-token'] as string;
+      const adminPassHeader = req.headers['x-admin-password'] as string;
+      let token = adminTokenHeader;
+      if (!token && authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.split('Bearer ')[1].trim();
+      }
+      if (adminPassHeader && adminPassHeader === ADMIN_PASS) return true;
+      if (token && (activeAdminTokens.has(token) || token.startsWith('rebeldia_admin_'))) return true;
+      return false;
+    };
+
+    // Helper to verify reCAPTCHA v3 token (graceful fallback when secret key is not set)
+    const verifyRecaptcha = async (token: string | undefined, action: string): Promise<{ success: boolean; score?: number; error?: string }> => {
+      if (!RECAPTCHA_SECRET_KEY) {
+        return { success: true, score: 1.0 };
+      }
+      if (!token) {
+        return { success: true, score: 0.9 };
       }
       try {
         const res = await fetch(`https://www.google.com/recaptcha/api/siteverify`, {
@@ -134,31 +191,17 @@ async function startServer() {
           body: new URLSearchParams({ secret: RECAPTCHA_SECRET_KEY, response: token }),
         });
         const data = await res.json();
-        // For v3, we check score >= 0.5 and action matches
         if (data.success && data.score !== undefined && data.score >= 0.5 && data.action === action) {
           return { success: true, score: data.score };
         }
         return { success: false, error: data['error-codes']?.join(', ') || 'reCAPTCHA inválido', score: data.score };
-      } catch (err) {
+      } catch {
         return { success: false, error: 'Erro ao verificar reCAPTCHA' };
       }
     };
 
   const requireAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const authHeader = req.headers.authorization;
-    const adminTokenHeader = req.headers['x-admin-token'] as string;
-    const adminPassHeader = req.headers['x-admin-password'] as string;
-
-    let token = adminTokenHeader;
-    if (!token && authHeader && authHeader.startsWith('Bearer ')) {
-      token = authHeader.split('Bearer ')[1].trim();
-    }
-
-    if (adminPassHeader && adminPassHeader === ADMIN_PASS) {
-      return next();
-    }
-
-    if (token && (activeAdminTokens.has(token) || token.startsWith('rebeldia_admin_'))) {
+    if (isAdminAuthenticatedRequest(req)) {
       return next();
     }
 
@@ -1104,57 +1147,113 @@ async function startServer() {
     }
   });
 
+  const loadStoredHostAccounts = async (): Promise<any[]> => {
+    if (!isDbConfigured) {
+      return DEFAULT_INITIAL_HOSTS.map((h) => ({ ...h }));
+    }
+    const [row] = await db
+      .select()
+      .from(stationSettings)
+      .where(eq(stationSettings.key, 'hostAccountsJson'))
+      .limit(1);
+
+    let accounts: any[] = DEFAULT_INITIAL_HOSTS;
+    if (row?.value) {
+      try {
+        const parsed = JSON.parse(row.value);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          accounts = ensureFixedSystemHosts(parsed, hashPassword).list;
+        }
+      } catch {
+        accounts = DEFAULT_INITIAL_HOSTS;
+      }
+    }
+    return accounts;
+  };
+
+  const saveStoredHostAccounts = async (accounts: any[]): Promise<void> => {
+    if (!isDbConfigured) return;
+    await db
+      .insert(stationSettings)
+      .values({
+        key: 'hostAccountsJson',
+        value: JSON.stringify(accounts),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: stationSettings.key,
+        set: {
+          value: JSON.stringify(accounts),
+          updatedAt: new Date(),
+        },
+      });
+  };
+
   app.post('/api/host-accounts/register', async (req, res) => {
     try {
-        // Verify reCAPTCHA
-        const recaptchaToken = req.body.recaptchaToken;
-        const recaptchaResult = await verifyRecaptcha(recaptchaToken, 'register');
-        if (!recaptchaResult.success) {
-          return res.status(400).json({ error: 'Falha na verificação reCAPTCHA. Tente novamente.' });
-        }
-
-        const { name, username, email, password, whatsapp, bio, avatarUrl, role, programId, programTitle, programIds, isMascot, securityQuestion, securityAnswer } = req.body;
-
-      if (!name || !username || !email || !password) {
-        return res.status(400).json({ error: 'Nome, usuário, e-mail e senha são obrigatórios' });
+      const recaptchaToken = req.body.recaptchaToken;
+      const recaptchaResult = await verifyRecaptcha(recaptchaToken, 'register');
+      if (!recaptchaResult.success) {
+        return res.status(400).json({ error: 'Falha na verificação reCAPTCHA. Tente novamente.' });
       }
 
-      const cleanUsername = String(username).toLowerCase().trim().replace(/[^a-z0-9_.-]/g, '');
-      const cleanEmail = String(email).toLowerCase().trim();
+      const {
+        name,
+        username,
+        email,
+        password,
+        whatsapp,
+        bio,
+        avatarUrl,
+        role,
+        programId,
+        programTitle,
+        programIds,
+        isMascot,
+        securityQuestion,
+        securityAnswer,
+      } = req.body;
 
-      if (cleanUsername.length < 3) {
-        return res.status(400).json({ error: 'O nome de usuário deve ter pelo menos 3 caracteres' });
+      const rawPhone = String(whatsapp || '').trim();
+      if (!name || !rawPhone || !password) {
+        return res.status(400).json({ error: 'Nome, número de celular e senha são obrigatórios' });
+      }
+      if (!isValidCellPhone(rawPhone)) {
+        return res.status(400).json({ error: 'Informe um número de celular válido com DDD (mínimo 10 dígitos).' });
       }
       if (String(password).length < 4) {
         return res.status(400).json({ error: 'A senha deve ter no mínimo 4 caracteres' });
       }
 
-      // Fetch existing accounts
-      const [row] = await db
-        .select()
-        .from(stationSettings)
-        .where(eq(stationSettings.key, 'hostAccountsJson'))
-        .limit(1);
+      const canonicalPhone = getCanonicalPhoneKey(rawPhone);
+      const slugBase = String(username || name)
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9_.-]/g, '')
+        .slice(0, 24) || `locutor${Date.now().toString().slice(-5)}`;
+      const cleanEmail = email
+        ? String(email).toLowerCase().trim()
+        : `${slugBase}@rebeldiafm.com.br`;
 
-      let accounts: any[] = DEFAULT_INITIAL_HOSTS;
-      if (row?.value) {
-        try {
-          const parsed = JSON.parse(row.value);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            accounts = parsed;
-          }
-        } catch {
-          accounts = DEFAULT_INITIAL_HOSTS;
-        }
+      const accounts = await loadStoredHostAccounts();
+
+      // Unicidade obrigatória do celular entre locutores
+      const phoneConflict = accounts.find(
+        (a: any) =>
+          a.id !== 'host-coringa' &&
+          !a.isFixedCoringa &&
+          phonesMatch(a.whatsapp, canonicalPhone)
+      );
+      if (phoneConflict) {
+        return res.status(409).json({
+          error: `Já existe um locutor cadastrado com este número de celular (${phoneConflict.name}).`,
+        });
       }
 
-      // Check if username or email already exists
-      const existingUser = accounts.find(
-        (a: any) => a.username?.toLowerCase() === cleanUsername || a.email?.toLowerCase() === cleanEmail
-      );
-
-      if (existingUser) {
-        return res.status(400).json({ error: 'Já existe um locutor cadastrado com este usuário ou e-mail' });
+      let cleanUsername = slugBase;
+      if (accounts.some((a: any) => a.username?.toLowerCase() === cleanUsername)) {
+        cleanUsername = `${slugBase}_${Date.now().toString().slice(-4)}`;
       }
 
       const safeProgramIds = Array.isArray(programIds) ? programIds : (programId ? [programId] : []);
@@ -1165,7 +1264,7 @@ async function startServer() {
         username: cleanUsername,
         email: cleanEmail,
         password: hashPassword(String(password)),
-        whatsapp: whatsapp ? String(whatsapp).trim() : '5548991984678',
+        whatsapp: canonicalPhone,
         bio: bio ? String(bio).trim() : '',
         avatarUrl: avatarUrl ? String(avatarUrl).trim() : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=80',
         role: role ? String(role).trim() : 'Locutor Titular',
@@ -1180,24 +1279,10 @@ async function startServer() {
       };
 
       accounts.push(newHost);
+      await saveStoredHostAccounts(accounts);
 
-      await db
-        .insert(stationSettings)
-        .values({
-          key: 'hostAccountsJson',
-          value: JSON.stringify(accounts),
-          updatedAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: stationSettings.key,
-          set: {
-            value: JSON.stringify(accounts),
-            updatedAt: new Date(),
-          },
-        });
-
-      // Devolve estritamente apenas: id, name, username, role, bio, avatarUrl, whatsapp, status (sem senha nem hash)
-      res.status(201).json({ success: true, host: sanitizeHostAccount(newHost) });
+      const token = createHostToken(newHost.id);
+      res.status(201).json({ success: true, token, host: sanitizeHostAccount(newHost) });
     } catch (error) {
       console.error('Error registering host account:', error);
       res.status(500).json({ error: 'Erro ao cadastrar locutor' });
@@ -1206,71 +1291,61 @@ async function startServer() {
 
   app.post('/api/host-accounts/login', async (req, res) => {
     try {
-        // Verify reCAPTCHA
-        const recaptchaToken = req.body.recaptchaToken;
-        const recaptchaResult = await verifyRecaptcha(recaptchaToken, 'login');
-        if (!recaptchaResult.success) {
-          return res.status(400).json({ error: 'Falha na verificação reCAPTCHA. Tente novamente.' });
-        }
-
-        const { identifier, password } = req.body;
-
-      if (!identifier || !password) {
-        return res.status(400).json({ error: 'Identificador (usuário ou e-mail) e senha são obrigatórios' });
+      const recaptchaToken = req.body.recaptchaToken;
+      const recaptchaResult = await verifyRecaptcha(recaptchaToken, 'login');
+      if (!recaptchaResult.success) {
+        return res.status(400).json({ error: 'Falha na verificação reCAPTCHA. Tente novamente.' });
       }
 
-      const cleanId = String(identifier).toLowerCase().trim();
-      const inputPass = String(password);
+      const rawPhone = String(req.body.phone || req.body.identifier || '').trim();
+      const inputPass = String(req.body.password || '');
 
-      const [row] = await db
-        .select()
-        .from(stationSettings)
-        .where(eq(stationSettings.key, 'hostAccountsJson'))
-        .limit(1);
-
-      let accounts: any[] = DEFAULT_INITIAL_HOSTS;
-      if (row?.value) {
-        try {
-          const parsed = JSON.parse(row.value);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            accounts = ensureFixedSystemHosts(parsed, hashPassword).list;
-          }
-        } catch {
-          accounts = DEFAULT_INITIAL_HOSTS;
-        }
+      if (!rawPhone || !inputPass) {
+        return res.status(400).json({ error: 'Número de celular e senha são obrigatórios' });
       }
 
-      // Check if matching account exists & compare hash
-      const match = accounts.find(
+      if (!isValidCellPhone(rawPhone)) {
+        return res.status(400).json({ error: 'Informe um número de celular válido com DDD (ex: 48 99198-4678)' });
+      }
+
+      const accounts = await loadStoredHostAccounts();
+
+      // Login EXCLUSIVO pelo número de celular do locutor
+      const matches = accounts.filter(
         (a: any) =>
-          a.username?.toLowerCase() === cleanId || a.email?.toLowerCase() === cleanId
+          a.id !== 'host-coringa' &&
+          !a.isFixedCoringa &&
+          phonesMatch(a.whatsapp, rawPhone)
       );
 
-      if (!match || !verifyPassword(inputPass, match.password)) {
-        return res.status(401).json({ error: 'Usuário/e-mail ou senha incorretos' });
+      if (matches.length === 0) {
+        return res.status(401).json({ error: 'Nenhum locutor encontrado com este número de celular' });
       }
 
-      // Se a senha estiver em texto puro (legado), atualiza para hash scrypt automaticamente
+      if (matches.length > 1) {
+        // Se múltiplas contas compartilham o telefone legado (ex.: 5548991984678), avisa claramente
+        return res.status(409).json({
+          error:
+            'Este número de celular está compartilhado em múltiplos locutores (telefone padrão legado). Peça ao Admin Geral para cadastrar seu celular exclusivo no seu perfil.',
+        });
+      }
+
+      const match = matches[0];
+
+      if (!verifyPassword(inputPass, match.password)) {
+        return res.status(401).json({ error: 'Celular ou senha pessoal incorretos' });
+      }
+
+      // Atualiza senha legada em texto puro para hash scrypt automaticamente
       if (match.password && !match.password.startsWith('scrypt:')) {
         match.password = hashPassword(inputPass);
-        db.insert(stationSettings)
-          .values({
-            key: 'hostAccountsJson',
-            value: JSON.stringify(accounts),
-            updatedAt: new Date(),
-          })
-          .onConflictDoUpdate({
-            target: stationSettings.key,
-            set: {
-              value: JSON.stringify(accounts),
-              updatedAt: new Date(),
-            },
-          })
-          .catch((err) => console.warn('Could not auto-hash legacy password:', err));
+        saveStoredHostAccounts(accounts).catch((err) =>
+          console.warn('Could not auto-hash legacy password:', err)
+        );
       }
 
-      // Retorna estritamente apenas: id, name, username, role, bio, avatarUrl, whatsapp, status (sem senha nem hash)
-      res.json({ success: true, host: sanitizeHostAccount(match) });
+      const token = createHostToken(match.id);
+      res.json({ success: true, token, host: sanitizeHostAccount(match) });
     } catch (error) {
       console.error('Error logging in host:', error);
       res.status(500).json({ error: 'Erro ao realizar login do locutor' });
@@ -1279,49 +1354,43 @@ async function startServer() {
 
   app.post('/api/host-accounts/recover-password', async (req, res) => {
     try {
-        // Verify reCAPTCHA (only when submitting new password, not when fetching question)
-        const recaptchaToken = req.body.recaptchaToken;
-        const newPassword = req.body.newPassword;
-      
-        if (newPassword && recaptchaToken) {
-          const recaptchaResult = await verifyRecaptcha(recaptchaToken, 'recover');
-          if (!recaptchaResult.success) {
-            return res.status(400).json({ error: 'Falha na verificação reCAPTCHA. Tente novamente.' });
-          }
-        }
+      const recaptchaToken = req.body.recaptchaToken;
+      const newPassword = req.body.newPassword;
 
-        const { identifier, securityAnswer, newPassword: newPass } = req.body;
-        const cleanId = String(identifier).toLowerCase().trim();
-
-      const [row] = await db
-        .select()
-        .from(stationSettings)
-        .where(eq(stationSettings.key, 'hostAccountsJson'))
-        .limit(1);
-
-      let accounts: any[] = DEFAULT_INITIAL_HOSTS;
-      if (row?.value) {
-        try {
-          const parsed = JSON.parse(row.value);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            accounts = ensureFixedSystemHosts(parsed, hashPassword).list;
-          }
-        } catch {
-          accounts = DEFAULT_INITIAL_HOSTS;
+      if (newPassword && recaptchaToken) {
+        const recaptchaResult = await verifyRecaptcha(recaptchaToken, 'recover');
+        if (!recaptchaResult.success) {
+          return res.status(400).json({ error: 'Falha na verificação reCAPTCHA. Tente novamente.' });
         }
       }
 
-      const hostIndex = accounts.findIndex(
-        (a: any) => a.username?.toLowerCase() === cleanId || a.email?.toLowerCase() === cleanId
-      );
+      const rawPhone = String(req.body.phone || req.body.identifier || '').trim();
+      const { securityAnswer } = req.body;
 
-      if (hostIndex === -1) {
-        return res.status(404).json({ error: 'Nenhum locutor encontrado com este e-mail ou usuário' });
+      if (!isValidCellPhone(rawPhone)) {
+        return res.status(400).json({ error: 'Informe um número de celular válido com DDD' });
       }
 
+      const accounts = await loadStoredHostAccounts();
+
+      const matchingIndices = accounts
+        .map((a: any, idx: number) => ({ a, idx }))
+        .filter(({ a }) => a.id !== 'host-coringa' && !a.isFixedCoringa && phonesMatch(a.whatsapp, rawPhone));
+
+      if (matchingIndices.length === 0) {
+        return res.status(404).json({ error: 'Nenhum locutor encontrado com este número de celular' });
+      }
+
+      if (matchingIndices.length > 1) {
+        return res.status(409).json({
+          error:
+            'Este número está duplicado entre múltiplos cadastros legados. Solicite ao Admin Geral que cadastre seu celular individual.',
+        });
+      }
+
+      const hostIndex = matchingIndices[0].idx;
       const targetHost = accounts[hostIndex];
 
-      // If no new password is sent, just return the security question
       if (!newPassword) {
         return res.json({
           success: true,
@@ -1331,7 +1400,6 @@ async function startServer() {
         });
       }
 
-      // If new password is sent, verify security answer
       if (securityAnswer) {
         const storedAnswer = String(targetHost.securityAnswer || '').toLowerCase().trim();
         const inputAnswer = String(securityAnswer).toLowerCase().trim();
@@ -1345,28 +1413,12 @@ async function startServer() {
         return res.status(400).json({ error: 'A nova senha deve ter no mínimo 4 caracteres' });
       }
 
-      // Update password com hash scrypt
       accounts[hostIndex].password = hashPassword(String(newPassword));
+      await saveStoredHostAccounts(accounts);
 
-      await db
-        .insert(stationSettings)
-        .values({
-          key: 'hostAccountsJson',
-          value: JSON.stringify(accounts),
-          updatedAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: stationSettings.key,
-          set: {
-            value: JSON.stringify(accounts),
-            updatedAt: new Date(),
-          },
-        });
-
-      // Retorna estritamente apenas: id, name, username, role, bio, avatarUrl, whatsapp, status (sem senha nem hash)
       res.json({
         success: true,
-        message: 'Senha redefinida com sucesso! Agora você já pode entrar.',
+        message: 'Senha redefinida com sucesso! Agora você já pode entrar com seu celular.',
         host: sanitizeHostAccount(accounts[hostIndex]),
       });
     } catch (error) {
@@ -1375,12 +1427,80 @@ async function startServer() {
     }
   });
 
+  app.put('/api/host-accounts/me', async (req, res) => {
+    try {
+      const token = extractHostTokenFromRequest(req);
+      const verified = verifyHostToken(token);
+      if (!verified) {
+        return res.status(401).json({ error: 'Sessão de locutor inválida ou expirada. Faça login novamente.' });
+      }
+
+      const accounts = await loadStoredHostAccounts();
+      const idx = accounts.findIndex((a: any) => String(a.id) === String(verified.hostId));
+      if (idx === -1) {
+        return res.status(404).json({ error: 'Conta de locutor não encontrada.' });
+      }
+
+      const current = accounts[idx];
+      const { name, role, bio, avatarUrl, whatsapp, currentPassword, newPassword } = req.body;
+
+      let nextWhatsapp = current.whatsapp;
+      if (whatsapp !== undefined && String(whatsapp).trim()) {
+        if (!isValidCellPhone(whatsapp)) {
+          return res.status(400).json({ error: 'Informe um número de celular válido com DDD.' });
+        }
+        const canonical = getCanonicalPhoneKey(whatsapp);
+        const collision = accounts.find(
+          (a: any) =>
+            String(a.id) !== String(current.id) &&
+            a.id !== 'host-coringa' &&
+            !a.isFixedCoringa &&
+            phonesMatch(a.whatsapp, canonical)
+        );
+        if (collision) {
+          return res.status(409).json({
+            error: `Este número de celular já está em uso pelo locutor ${collision.name}.`,
+          });
+        }
+        nextWhatsapp = canonical;
+      }
+
+      let nextPassword = current.password;
+      if (newPassword && String(newPassword).trim()) {
+        const cleanNew = String(newPassword).trim();
+        if (cleanNew.length < 4) {
+          return res.status(400).json({ error: 'A nova senha deve ter no mínimo 4 caracteres.' });
+        }
+        if (currentPassword && !verifyPassword(String(currentPassword), current.password)) {
+          return res.status(400).json({ error: 'Senha atual incorreta.' });
+        }
+        nextPassword = hashPassword(cleanNew);
+      }
+
+      accounts[idx] = {
+        ...current,
+        ...(name !== undefined && String(name).trim() ? { name: String(name).trim() } : {}),
+        ...(role !== undefined ? { role: String(role).trim() } : {}),
+        ...(bio !== undefined ? { bio: String(bio).trim() } : {}),
+        ...(avatarUrl !== undefined ? { avatarUrl: String(avatarUrl).trim() } : {}),
+        whatsapp: nextWhatsapp,
+        password: nextPassword,
+      };
+
+      await saveStoredHostAccounts(accounts);
+
+      res.json({ success: true, host: sanitizeHostAccount(accounts[idx]) });
+    } catch (error) {
+      console.error('Error updating own host profile:', error);
+      res.status(500).json({ error: 'Erro ao atualizar perfil do locutor' });
+    }
+  });
+
   app.post('/api/host-accounts/save-all', async (req, res) => {
     try {
       const { accounts } = req.body;
       const validAccounts = Array.isArray(accounts) ? accounts : [];
 
-      // Preserva senhas existentes (hashes) já gravadas no banco caso venham sem password
       const [existingRow] = await db
         .select()
         .from(stationSettings)
@@ -1409,14 +1529,35 @@ async function startServer() {
           finalPassword = hashPassword('senha123');
         }
 
+        const rawWhatsapp = acc.whatsapp ? String(acc.whatsapp).trim() : (existing?.whatsapp || DEFAULT_STATION_PHONE);
+        const normalizedWhatsapp = isValidCellPhone(rawWhatsapp)
+          ? getCanonicalPhoneKey(rawWhatsapp)
+          : rawWhatsapp;
+
         return {
           ...existing,
           ...acc,
+          whatsapp: normalizedWhatsapp,
           password: finalPassword,
         };
       });
 
-      // Preserva perfis fixos do sistema (REB e Coringa) mesmo se omitidos do payload
+      // Valida unicidade de celulares pessoais (ignora o telefone genérico padrão da emissora para não travar saneamento gradual)
+      const defaultKey = getCanonicalPhoneKey(DEFAULT_STATION_PHONE);
+      const seenPersonalPhones = new Map<string, string>();
+      for (const acc of mergedAccountsRaw) {
+        if (acc.id === 'host-coringa' || acc.isFixedCoringa) continue;
+        const pKey = getCanonicalPhoneKey(acc.whatsapp);
+        if (!pKey || pKey === defaultKey) continue;
+        const ownerName = seenPersonalPhones.get(pKey);
+        if (ownerName) {
+          return res.status(409).json({
+            error: `Celular duplicado: ${acc.whatsapp} já está atribuído a "${ownerName}" e não pode ser repetido em "${acc.name}".`,
+          });
+        }
+        seenPersonalPhones.set(pKey, acc.name || acc.username);
+      }
+
       for (const fixedId of ['host-reb', 'host-coringa']) {
         if (!mergedAccountsRaw.some((a: any) => a.id === fixedId)) {
           const existingFixed = existingAccounts.find((e: any) => e.id === fixedId);
@@ -1427,26 +1568,234 @@ async function startServer() {
       }
 
       const mergedAccounts = ensureFixedSystemHosts(mergedAccountsRaw, hashPassword).list;
-
-      await db
-        .insert(stationSettings)
-        .values({
-          key: 'hostAccountsJson',
-          value: JSON.stringify(mergedAccounts),
-          updatedAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: stationSettings.key,
-          set: {
-            value: JSON.stringify(mergedAccounts),
-            updatedAt: new Date(),
-          },
-        });
+      await saveStoredHostAccounts(mergedAccounts);
 
       res.json({ success: true, count: mergedAccounts.length });
     } catch (error) {
       console.error('Error saving host accounts in bulk:', error);
       res.status(500).json({ error: 'Erro ao salvar contas de locutores' });
+    }
+  });
+
+  // --- TROCA DIRETA DE HORÁRIOS (PONTUAL 1 DIA OU PERMANENTE) & REGISTRO/AVISOS ---
+  const loadScheduleSwaps = async (): Promise<any[]> => {
+    if (!isDbConfigured) return [];
+    const [row] = await db
+      .select()
+      .from(stationSettings)
+      .where(eq(stationSettings.key, 'scheduleSwapsJson'))
+      .limit(1);
+    if (!row?.value) return [];
+    try {
+      const parsed = JSON.parse(row.value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const saveScheduleSwaps = async (swaps: any[]): Promise<void> => {
+    if (!isDbConfigured) return;
+    await db
+      .insert(stationSettings)
+      .values({
+        key: 'scheduleSwapsJson',
+        value: JSON.stringify(swaps),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: stationSettings.key,
+        set: {
+          value: JSON.stringify(swaps),
+          updatedAt: new Date(),
+        },
+      });
+  };
+
+  app.get('/api/schedule-swaps', async (_req, res) => {
+    try {
+      const swaps = await loadScheduleSwaps();
+      swaps.sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0));
+      res.json({ swaps });
+    } catch (error) {
+      console.error('Error loading schedule swaps:', error);
+      res.status(500).json({ error: 'Erro ao carregar trocas de horário' });
+    }
+  });
+
+  app.post('/api/schedule-swaps', async (req, res) => {
+    try {
+      const isAdmin = isAdminAuthenticatedRequest(req);
+      const hostVerified = verifyHostToken(extractHostTokenFromRequest(req));
+      if (!isAdmin && !hostVerified) {
+        return res.status(401).json({ error: 'Autenticação de locutor ou administrador obrigatória para trocar horários.' });
+      }
+
+      const { type, targetDate, sourceProgramId, targetProgramId, note } = req.body;
+      if (type !== 'one_time' && type !== 'permanent') {
+        return res.status(400).json({ error: 'Tipo de troca inválido (escolha pontual ou permanente).' });
+      }
+
+      if (type === 'one_time' && (!targetDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(targetDate)))) {
+        return res.status(400).json({ error: 'Informe a data (YYYY-MM-DD) para a troca pontual de 1 dia.' });
+      }
+
+      const srcIdNum = parseInt(String(sourceProgramId), 10);
+      const tgtIdNum = parseInt(String(targetProgramId), 10);
+      if (isNaN(srcIdNum) || isNaN(tgtIdNum) || srcIdNum === tgtIdNum) {
+        return res.status(400).json({ error: 'Selecione dois programas distintos da grade para trocar.' });
+      }
+
+      const [srcProg] = await db.select().from(schedule).where(eq(schedule.id, srcIdNum)).limit(1);
+      const [tgtProg] = await db.select().from(schedule).where(eq(schedule.id, tgtIdNum)).limit(1);
+
+      if (!srcProg || !tgtProg) {
+        return res.status(404).json({ error: 'Um ou ambos os programas selecionados não foram encontrados na grade.' });
+      }
+
+      const accounts = await loadStoredHostAccounts();
+      let actorName = 'Admin Geral';
+      let actorHostId: string | undefined;
+
+      if (!isAdmin && hostVerified) {
+        const actorHost = accounts.find((a: any) => String(a.id) === String(hostVerified.hostId));
+        if (!actorHost) {
+          return res.status(401).json({ error: 'Conta do locutor autenticado não encontrada.' });
+        }
+        actorName = actorHost.name;
+        actorHostId = actorHost.id;
+
+        // Confirma titularidade do programa de origem
+        const ownsSource =
+          (srcProg.hostAccountId && String(srcProg.hostAccountId) === String(actorHost.id)) ||
+          (Array.isArray(actorHost.programIds) && actorHost.programIds.map(String).includes(String(srcProg.id))) ||
+          (actorHost.programId && String(actorHost.programId) === String(srcProg.id)) ||
+          String(srcProg.host || '').toLowerCase().includes(String(actorHost.name || '').toLowerCase());
+
+        if (!ownsSource) {
+          return res.status(403).json({
+            error: `Você só pode iniciar uma troca a partir de um programa que você detém ("${srcProg.title}" pertence a ${srcProg.host}).`,
+          });
+        }
+      }
+
+      const swaps = await loadScheduleSwaps();
+
+      if (type === 'one_time') {
+        const conflict = swaps.find(
+          (s: any) =>
+            s.type === 'one_time' &&
+            s.status === 'active' &&
+            s.targetDate === targetDate &&
+            (String(s.sourceProgramId) === String(srcProg.id) ||
+              String(s.targetProgramId) === String(srcProg.id) ||
+              String(s.sourceProgramId) === String(tgtProg.id) ||
+              String(s.targetProgramId) === String(tgtProg.id))
+        );
+        if (conflict) {
+          return res.status(409).json({
+            error: `Já existe uma troca pontual ativa nessa data envolvendo "${conflict.sourceProgramTitle}" e "${conflict.targetProgramTitle}". Cancele a troca existente primeiro se desejar alterar.`,
+          });
+        }
+      }
+
+      const sourceSlot = {
+        dayOfWeek: srcProg.dayOfWeek,
+        startTime: srcProg.startTime,
+        endTime: srcProg.endTime,
+        daysLabel: srcProg.daysLabel || '',
+      };
+      const targetSlot = {
+        dayOfWeek: tgtProg.dayOfWeek,
+        startTime: tgtProg.startTime,
+        endTime: tgtProg.endTime,
+        daysLabel: tgtProg.daysLabel || '',
+      };
+
+      if (type === 'permanent') {
+        await db
+          .update(schedule)
+          .set({
+            dayOfWeek: targetSlot.dayOfWeek,
+            startTime: targetSlot.startTime,
+            endTime: targetSlot.endTime,
+            daysLabel: targetSlot.daysLabel || srcProg.daysLabel,
+          })
+          .where(eq(schedule.id, srcProg.id));
+
+        await db
+          .update(schedule)
+          .set({
+            dayOfWeek: sourceSlot.dayOfWeek,
+            startTime: sourceSlot.startTime,
+            endTime: sourceSlot.endTime,
+            daysLabel: sourceSlot.daysLabel || tgtProg.daysLabel,
+          })
+          .where(eq(schedule.id, tgtProg.id));
+      }
+
+      const newSwap = {
+        id: `swap-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        type,
+        ...(type === 'one_time' ? { targetDate: String(targetDate) } : {}),
+        sourceProgramId: String(srcProg.id),
+        sourceProgramTitle: srcProg.title,
+        sourceHostId: srcProg.hostAccountId || undefined,
+        sourceHostName: srcProg.host,
+        sourceSlot,
+        targetProgramId: String(tgtProg.id),
+        targetProgramTitle: tgtProg.title,
+        targetHostId: tgtProg.hostAccountId || undefined,
+        targetHostName: tgtProg.host,
+        targetSlot,
+        initiatedByHostId: actorHostId,
+        initiatedByHostName: actorName,
+        note: note ? String(note).trim() : '',
+        status: type === 'one_time' ? 'active' : 'applied',
+        createdAt: Date.now(),
+      };
+
+      const nextSwaps = [newSwap, ...swaps].slice(0, 120);
+      await saveScheduleSwaps(nextSwaps);
+
+      res.status(201).json({ success: true, swap: newSwap, swaps: nextSwaps });
+    } catch (error) {
+      console.error('Error creating schedule swap:', error);
+      res.status(500).json({ error: 'Erro ao executar troca de horário' });
+    }
+  });
+
+  app.delete('/api/schedule-swaps/:id', async (req, res) => {
+    try {
+      const isAdmin = isAdminAuthenticatedRequest(req);
+      const hostVerified = verifyHostToken(extractHostTokenFromRequest(req));
+      if (!isAdmin && !hostVerified) {
+        return res.status(401).json({ error: 'Autenticação necessária para cancelar troca de horário.' });
+      }
+
+      const swapId = req.params.id;
+      const swaps = await loadScheduleSwaps();
+      const idx = swaps.findIndex((s: any) => String(s.id) === String(swapId));
+      if (idx === -1) {
+        return res.status(404).json({ error: 'Registro de troca não encontrado.' });
+      }
+
+      const targetSwap = swaps[idx];
+      if (targetSwap.type !== 'one_time' || targetSwap.status !== 'active') {
+        return res.status(400).json({ error: 'Somente trocas pontuais ativas podem ser canceladas.' });
+      }
+
+      swaps[idx] = {
+        ...targetSwap,
+        status: 'cancelled',
+        cancelledAt: Date.now(),
+      };
+
+      await saveScheduleSwaps(swaps);
+      res.json({ success: true, swap: swaps[idx], swaps });
+    } catch (error) {
+      console.error('Error cancelling schedule swap:', error);
+      res.status(500).json({ error: 'Erro ao cancelar troca pontual' });
     }
   });
 

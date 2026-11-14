@@ -42,6 +42,8 @@ import {
 } from 'lucide-react';
 import { HostAccount, ProgramItem, RadioStationConfig } from '../types';
 import { ProgramRecordingsSection } from './ProgramRecordingsSection';
+import { api } from '../utils/api';
+import { formatPhoneDisplay, isHostOwnerOfProgram, isValidCellPhone } from '../utils/hostPhone';
 import {
   formatMainSchedule,
   formatRepriseSchedule,
@@ -59,6 +61,7 @@ interface ProgramHotsiteModalProps {
   stationConfig: RadioStationConfig;
   onUpdateProgram?: (updated: ProgramItem) => void;
   currentLoggedInHost?: HostAccount | null;
+  onHostLogin?: (host: HostAccount, token?: string) => void;
   onOpenHostAuth?: () => void;
   onOpenTakeoverModal?: (program?: ProgramItem) => void;
 }
@@ -74,6 +77,7 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
   stationConfig,
   onUpdateProgram,
   currentLoggedInHost,
+  onHostLogin,
   onOpenHostAuth,
   onOpenTakeoverModal,
 }) => {
@@ -95,17 +99,19 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
   const [activeImageZoom, setActiveImageZoom] = useState<string | null>(null);
   const mobileTabContainerRef = useRef<HTMLDivElement>(null);
 
-  // Host Password Authentication & Editing state
+  // Autenticação exclusiva pelo locutor dono do programa (ou Admin Geral ativo)
+  const isAdminSessionActive = Boolean(
+    typeof localStorage !== 'undefined' && localStorage.getItem('rebeldia_admin_session')
+  );
   const isHostDirectOwner = Boolean(
-    currentLoggedInHost &&
-      (currentLoggedInHost.programId === program?.id ||
-        (program?.host && currentLoggedInHost.name.toLowerCase().includes(program.host.toLowerCase())) ||
-        (program?.host && program.host.toLowerCase().includes(currentLoggedInHost.name.toLowerCase())))
+    isAdminSessionActive || isHostOwnerOfProgram(currentLoggedInHost, program)
   );
 
   const [isHostUnlocked, setIsHostUnlocked] = useState<boolean>(isHostDirectOwner);
+  const [hostPhoneInput, setHostPhoneInput] = useState('');
   const [hostPasswordInput, setHostPasswordInput] = useState('');
   const [hostPasswordError, setHostPasswordError] = useState('');
+  const [isUnlockingHost, setIsUnlockingHost] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
 
   // Auto-scroll the active mobile tab pill smoothly into view
@@ -167,7 +173,6 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
   const [editAvatarUrl, setEditAvatarUrl] = useState(program?.avatarUrl || '');
   const [editBannerUrl, setEditBannerUrl] = useState(program?.bannerUrl || '');
   const [editLogoUrl, setEditLogoUrl] = useState(program?.logoUrl || '');
-  const [editHostPassword, setEditHostPassword] = useState(program?.hostPassword || '');
   const [editMixcloudUser, setEditMixcloudUser] = useState(program?.mixcloudUser || '');
   const [editMixcloudUrl, setEditMixcloudUrl] = useState(program?.mixcloudUrl || '');
   const [editPhotoGallery, setEditPhotoGallery] = useState<string[]>(program?.photoGallery || []);
@@ -200,12 +205,11 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
       setEditAvatarUrl(program.avatarUrl || '');
       setEditBannerUrl(program.bannerUrl || '');
       setEditLogoUrl(program.logoUrl || '');
-      setEditHostPassword(program.hostPassword || '');
       setEditMixcloudUser(program.mixcloudUser || '');
       setEditMixcloudUrl(program.mixcloudUrl || '');
       setEditPhotoGallery(program.photoGallery || []);
       setEditVideoGallery(
-              (program.videoGallery || []).map((item, idx) =>
+        (program.videoGallery || []).map((item, idx) =>
           typeof item === 'string'
             ? { id: String(idx), url: item, title: `Vídeo #${idx + 1}` }
             : { id: item.id || String(idx), url: item.url, title: item.title || `Vídeo #${idx + 1}` }
@@ -213,9 +217,7 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
       );
       setEditPlaylist(program.playlist || []);
       setEditHighlights(program.highlights || []);
-      if (isHostDirectOwner) {
-        setIsHostUnlocked(true);
-      }
+      setIsHostUnlocked(isHostDirectOwner);
     }
   }, [program, isHostDirectOwner]);
 
@@ -278,22 +280,43 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
     }, 4000);
   };
 
-  const handleUnlockHost = (e: React.FormEvent) => {
+  const handleUnlockHost = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanPhone = hostPhoneInput.trim();
     const cleanPass = hostPasswordInput.trim();
-    if (!cleanPass) return;
-    const validPass = program?.hostPassword || 'senha123';
-    if (
-      cleanPass === validPass ||
-      cleanPass === 'rebeldia' ||
-      cleanPass === 'reb123' ||
-      cleanPass === 'admin123' ||
-      (currentLoggedInHost && currentLoggedInHost.password === cleanPass)
-    ) {
+    if (!cleanPhone || !cleanPass) {
+      setHostPasswordError('Informe seu número de celular cadastrado e sua senha pessoal de locutor.');
+      return;
+    }
+    if (!isValidCellPhone(cleanPhone)) {
+      setHostPasswordError('Informe um número de celular válido com DDD (ex: 48 99198-4678).');
+      return;
+    }
+
+    setIsUnlockingHost(true);
+    setHostPasswordError('');
+    try {
+      const res = await api.loginHost(cleanPhone, cleanPass, program ? String(program.id) : undefined);
+      if (!res.success || !res.host) {
+        setHostPasswordError(res.error || 'Celular ou senha pessoal incorretos.');
+        return;
+      }
+
+      if (!isHostOwnerOfProgram(res.host, program)) {
+        setHostPasswordError(
+          `Você entrou como ${res.host.name}, mas este programa é apresentado por ${program?.host}. Apenas o locutor titular ou o Admin Geral pode editar este hotsite.`
+        );
+        return;
+      }
+
+      onHostLogin?.(res.host, res.token);
       setIsHostUnlocked(true);
+      setHostPasswordInput('');
       setHostPasswordError('');
-    } else {
-      setHostPasswordError('Senha incorreta para este programa. Dica padrão: "senha123" ou use a recuperação de senha.');
+    } catch (err: unknown) {
+      setHostPasswordError(err instanceof Error ? err.message : 'Erro ao autenticar locutor.');
+    } finally {
+      setIsUnlockingHost(false);
     }
   };
 
@@ -312,7 +335,6 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
       avatarUrl: editAvatarUrl.trim() || program.avatarUrl,
       bannerUrl: editBannerUrl.trim() || program.bannerUrl,
       logoUrl: editLogoUrl.trim() || program.logoUrl,
-      hostPassword: editHostPassword.trim() || program.hostPassword || 'senha123',
       mixcloudUser: editMixcloudUser.trim() || undefined,
       mixcloudUrl: editMixcloudUrl.trim() || undefined,
       photoGallery: editPhotoGallery,
@@ -440,29 +462,29 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
         className="relative w-full h-[100dvh] max-w-none bg-zinc-950 rounded-none border-0 overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Cover / Header Banner - Otimizado para mobile com logo no topo e botão abaixo */}
-        <div className="relative min-h-[225px] h-[225px] sm:h-52 bg-zinc-900 overflow-hidden shrink-0">
+        {/* Cover / Header Banner - Topo compacto com itens elevados */}
+        <div className="relative bg-zinc-900 overflow-hidden shrink-0">
           {/* Background image or gradient */}
           {program.bannerUrl ? (
             <img
               src={program.bannerUrl}
               alt={program.title}
-              className="w-full h-full object-cover filter brightness-[0.45] scale-105"
+              className="absolute inset-0 w-full h-full object-cover filter brightness-[0.45] scale-105"
             />
           ) : program.avatarUrl ? (
             <img
               src={program.avatarUrl}
               alt={program.title}
-              className="w-full h-full object-cover filter brightness-[0.4] blur-sm scale-105"
+              className="absolute inset-0 w-full h-full object-cover filter brightness-[0.4] blur-sm scale-105"
             />
           ) : (
-            <div className="w-full h-full bg-gradient-to-br from-zinc-900 via-zinc-950 to-black" />
+            <div className="absolute inset-0 w-full h-full bg-gradient-to-br from-zinc-900 via-zinc-950 to-black" />
           )}
 
           <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/70 to-transparent" />
 
-          {/* Top Bar Actions (No mobile baixado para o canto inferior direito conforme a seta; no desktop no topo direito) */}
-          <div className="absolute bottom-3.5 right-3 sm:top-3 sm:right-5 sm:bottom-auto flex items-center gap-1.5 sm:gap-2 z-20">
+          {/* Top Bar Actions (No mobile no canto inferior direito; no desktop no topo direito) */}
+          <div className="absolute bottom-2.5 right-3 sm:top-2.5 sm:right-5 sm:bottom-auto flex items-center gap-1.5 sm:gap-2 z-20">
             <button
               type="button"
               onClick={handleShare}
@@ -511,15 +533,13 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
           </div>
 
           {/* Program Main Identity in Header */}
-          <div className="absolute inset-0 p-3 sm:p-5 flex items-start sm:items-end justify-between gap-3 sm:gap-4 z-10 pointer-events-none">
+          <div className="relative p-3 sm:px-6 sm:py-3 flex items-start sm:items-center justify-between gap-3 sm:gap-4 z-10 pointer-events-none">
             <div className="flex items-start sm:items-center gap-3 sm:gap-4 min-w-0 flex-1 pointer-events-auto">
-              {/* Coluna Esquerda: Logo no Topo + Botão de Pausar/Ouvir Logo Abaixo */}
+              {/* Coluna Esquerda: Logo no Topo + Botão de Pausar/Ouvir Abaixo no Mobile */}
               <div className="flex flex-col items-center shrink-0">
-                {/* Quadro Oficial de Identidade Visual do Programa (Subido ao topo no mobile conforme seta) */}
                 {program.logoUrl ? (
                   <div className="relative shrink-0 group/logo">
-                    <div className="w-[104px] h-[104px] sm:w-[130px] sm:h-[130px] rounded-2xl shadow-2xl overflow-hidden relative flex items-center justify-center bg-black/50 backdrop-blur-md p-[3px] z-0">
-                      {/* Foto/Logo do Programa - borda de 3px com 50% de transparência e cantos arredondados */}
+                    <div className="w-[92px] h-[92px] sm:w-[104px] sm:h-[104px] rounded-2xl shadow-2xl overflow-hidden relative flex items-center justify-center bg-black/50 backdrop-blur-md p-[3px] z-0">
                       <img
                         src={program.logoUrl}
                         alt={`Logo ${program.title}`}
@@ -528,10 +548,9 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
                         }`}
                       />
                     </div>
-                    {/* Foto do Locutor em Badge na frente do logo (camada frontal com z-30) */}
                     {program.avatarUrl && (
                       <div
-                        className="absolute -bottom-1.5 -left-1.5 w-9 h-9 sm:w-14 sm:h-14 rounded-full overflow-hidden border-2 border-zinc-950 shadow-2xl ring-2 ring-white z-30 pointer-events-auto"
+                        className="absolute -bottom-1.5 -left-1.5 w-8 h-8 sm:w-11 sm:h-11 rounded-full overflow-hidden border-2 border-zinc-950 shadow-2xl ring-2 ring-white z-30 pointer-events-auto"
                         title={`Apresentador(a): ${program.host}`}
                       >
                         <img
@@ -544,7 +563,7 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
                   </div>
                 ) : program.avatarUrl ? (
                   <div className="relative shrink-0">
-                    <div className="w-[104px] h-[104px] sm:w-[130px] sm:h-[130px] rounded-2xl border-2 border-white shadow-2xl overflow-hidden backdrop-blur-md flex items-center justify-center">
+                    <div className="w-[92px] h-[92px] sm:w-[104px] sm:h-[104px] rounded-2xl border-2 border-white shadow-2xl overflow-hidden backdrop-blur-md flex items-center justify-center">
                       <img
                         src={program.avatarUrl}
                         alt={program.host}
@@ -553,25 +572,24 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
                     </div>
                   </div>
                 ) : (
-                  <div className="w-[104px] h-[104px] sm:w-[130px] sm:h-[130px] rounded-2xl bg-zinc-900 border-2 border-white flex items-center justify-center text-white shadow-2xl shrink-0">
-                    <Radio className="w-10 h-10 text-amber-400" />
+                  <div className="w-[92px] h-[92px] sm:w-[104px] sm:h-[104px] rounded-2xl bg-zinc-900 border-2 border-white flex items-center justify-center text-white shadow-2xl shrink-0">
+                    <Radio className="w-9 h-9 text-amber-400" />
                   </div>
                 )}
 
-                {/* Botão de Pausar / Ouvir Rádio Embaixo do Logo (baixado mais 15px = mt-[35px] no mobile) */}
+                {/* Botão de Pausar / Ouvir Rádio compacto abaixo do Logo no mobile */}
                 <button
                   type="button"
                   onClick={onTogglePlay}
-                  className="w-[104px] sm:hidden mt-[35px] py-1.5 px-2 rounded-xl bg-white hover:bg-zinc-200 text-black font-black text-xs transition flex items-center justify-center gap-1.5 shadow-xl cursor-pointer active:scale-95 shrink-0"
+                  className="w-[92px] sm:hidden mt-2.5 py-1.5 px-2 rounded-xl bg-white hover:bg-zinc-200 text-black font-black text-xs transition flex items-center justify-center gap-1.5 shadow-xl cursor-pointer active:scale-95 shrink-0"
                 >
                   <Radio className="w-3.5 h-3.5 text-black shrink-0" />
                   <span className="truncate">{isPlaying ? 'Pausar' : 'Ouvir'}</span>
                 </button>
               </div>
 
-              {/* Coluna Direita: Informações que ocupam todo o espaço restante indicado na seta */}
-              <div className="min-w-0 flex-1 flex flex-col justify-start sm:justify-end pt-1 sm:pt-0 pr-1 sm:pr-0">
-                {/* Badges: Sem o 'Hotsite Oficial' riscado, apenas Ao Vivo e Gênero */}
+              {/* Coluna Direita: Informações elevadas ocupando todo o espaço */}
+              <div className="min-w-0 flex-1 flex flex-col justify-start pb-10 sm:pb-0 pr-1 sm:pr-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {isLiveNow && (
                     <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-wider bg-red-600 text-white animate-pulse flex items-center gap-1 shadow-sm">
@@ -592,13 +610,11 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
                   )}
                 </div>
 
-                {/* Título do Programa ocupando todo o espaço */}
                 <h1 className="text-base sm:text-xl font-black text-white font-display mt-1 leading-tight drop-shadow-sm line-clamp-2">
                   {program.title}
                 </h1>
 
-                {/* Apresentador */}
-                <p className="text-xs text-zinc-300 flex items-center gap-1.5 mt-1 truncate">
+                <p className="text-xs text-zinc-300 flex items-center gap-1.5 mt-0.5 truncate">
                   <User className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
                   <span className="truncate">
                     Apresentação: <strong className="text-white font-bold">{program.host}</strong>
@@ -608,13 +624,11 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
                   </span>
                 </p>
 
-                {/* Linha de Transmissão (Horário Principal) ocupando todo o espaço no topo do card no mobile */}
                 <div className="flex items-center gap-1.5 text-[11px] text-zinc-300 font-mono mt-1 sm:hidden w-full">
                   <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                   <span className="text-white font-bold leading-tight">{formatMainSchedule(program)}</span>
                 </div>
 
-                {/* Reprise ocupando todo o espaço no topo do card no mobile */}
                 {Boolean(program.hasReprise) && (
                   <div className="flex items-center gap-1.5 text-[10.5px] text-amber-300 font-mono mt-0.5 sm:hidden w-full">
                     <Repeat className="w-3 h-3 text-amber-400 shrink-0" />
@@ -624,9 +638,8 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
               </div>
             </div>
 
-            {/* Bloco Direito do Header para Desktop */}
-            <div className="hidden sm:flex items-center gap-2 sm:gap-3 shrink-0 self-end pointer-events-auto">
-              {/* Card Horário de Transmissão posicionado no Header */}
+            {/* Bloco Direito do Header para Desktop (posicionado logo abaixo das ações do topo) */}
+            <div className="hidden sm:flex items-center gap-2 sm:gap-3 shrink-0 self-end pt-9 pointer-events-auto">
               <div className="flex flex-col justify-center px-3.5 py-1.5 rounded-2xl bg-black/80 backdrop-blur-md border border-white/15 text-left shadow-xl">
                 <div className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
@@ -643,11 +656,10 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
                 )}
               </div>
 
-              {/* Quick Live Listen Button Desktop */}
               <button
                 type="button"
                 onClick={onTogglePlay}
-                className="px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl bg-white hover:bg-zinc-200 text-black font-black text-xs transition flex items-center justify-center gap-1.5 shadow-lg cursor-pointer active:scale-95 shrink-0"
+                className="px-3.5 py-2.5 rounded-xl bg-white hover:bg-zinc-200 text-black font-black text-xs transition flex items-center justify-center gap-1.5 shadow-lg cursor-pointer active:scale-95 shrink-0"
               >
                 <Radio className="w-3.5 h-3.5 text-black" />
                 <span>{isPlaying ? 'Pausar' : 'Ouvir Rádio'}</span>
@@ -1265,22 +1277,28 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
             </div>
           )}
 
-          {/* TAB 5: Host Edit & Password Authentication */}
+          {/* TAB 5: Host Authentication (Exclusiva por Celular + Senha Pessoal do Locutor) */}
           {activeTab === 'host_edit' && (
             <div className="space-y-6">
               {!isHostUnlocked ? (
                 <div className="max-w-md mx-auto p-6 rounded-2xl bg-zinc-900/90 border border-white/15 shadow-2xl space-y-5 text-center">
                   <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400 shadow-inner">
-                    <Lock className="w-7 h-7" />
+                    <Phone className="w-7 h-7" />
                   </div>
                   <div>
                     <h3 className="text-lg font-black text-white font-display">
-                      Acesso Restrito ao Locutor
+                      Acesso Exclusivo do Locutor
                     </h3>
                     <p className="text-xs text-zinc-400 mt-1">
-                      Você é <strong>{program.host}</strong> ou administrador? Digite a senha deste programa ou conecte-se com sua conta para editar fotos, repertório e perfil.
+                      Você é <strong>{program.host}</strong>? Entre com seu <strong>celular cadastrado</strong> e sua <strong>senha pessoal de locutor</strong> para editar este hotsite.
                     </p>
                   </div>
+
+                  {currentLoggedInHost && !isHostDirectOwner && (
+                    <div className="p-3 rounded-xl bg-amber-950/50 border border-amber-500/30 text-amber-200 text-xs text-left">
+                      Sessão atual conectada: <strong>{currentLoggedInHost.name}</strong> ({formatPhoneDisplay(currentLoggedInHost.whatsapp)}). Este programa pertence a <strong>{program.host}</strong>.
+                    </div>
+                  )}
 
                   {hostPasswordError && (
                     <div className="p-3 rounded-xl bg-red-950/60 border border-red-500/30 text-red-300 text-xs flex items-center gap-2 text-left">
@@ -1289,28 +1307,56 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
                     </div>
                   )}
 
-                  <form onSubmit={handleUnlockHost} className="space-y-3">
-                    <div className="relative">
-                      <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="password"
-                        value={hostPasswordInput}
-                        onChange={(e) => {
-                          setHostPasswordInput(e.target.value);
-                          setHostPasswordError('');
-                        }}
-                        placeholder="Digite a senha do programa..."
-                        className="w-full bg-zinc-950 border border-white/15 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500 font-mono transition"
-                        autoFocus
-                      />
+                  <form onSubmit={handleUnlockHost} className="space-y-3 text-left">
+                    <div>
+                      <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                        Celular do Locutor (com DDD)
+                      </label>
+                      <div className="relative">
+                        <Phone className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="tel"
+                          inputMode="tel"
+                          value={hostPhoneInput}
+                          onChange={(e) => {
+                            setHostPhoneInput(e.target.value);
+                            setHostPasswordError('');
+                          }}
+                          placeholder="Ex: (48) 99198-4678"
+                          className="w-full bg-zinc-950 border border-white/15 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500 font-mono tabular-nums transition"
+                          autoFocus
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                        Senha Pessoal do Locutor
+                      </label>
+                      <div className="relative">
+                        <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="password"
+                          value={hostPasswordInput}
+                          onChange={(e) => {
+                            setHostPasswordInput(e.target.value);
+                            setHostPasswordError('');
+                          }}
+                          placeholder="Digite sua senha pessoal..."
+                          className="w-full bg-zinc-950 border border-white/15 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500 font-mono transition"
+                          required
+                        />
+                      </div>
                     </div>
 
                     <button
                       type="submit"
-                      className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-black text-xs uppercase tracking-wider transition flex items-center justify-center gap-2 shadow-lg cursor-pointer"
+                      disabled={isUnlockingHost}
+                      className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-black text-xs uppercase tracking-wider transition flex items-center justify-center gap-2 shadow-lg cursor-pointer disabled:opacity-50"
                     >
                       <ShieldCheck className="w-4 h-4" />
-                      Desbloquear Edição do Hotsite
+                      <span>{isUnlockingHost ? 'Verificando...' : 'Entrar e Editar Hotsite'}</span>
                     </button>
                   </form>
 
@@ -1325,11 +1371,11 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
                         className="w-full py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold transition flex items-center justify-center gap-2 border border-white/10"
                       >
                         <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
-                        Login Completo com Usuário & E-mail
+                        <span>Esqueci a Senha / Abrir Área do Locutor</span>
                       </button>
                     )}
                     <p className="text-[11px] text-zinc-500">
-                      Dica: A senha padrão de locutores é <code className="text-zinc-300 font-mono">senha123</code>.
+                      A senha agora é vinculada exclusivamente ao locutor, nunca ao programa individual.
                     </p>
                   </div>
                 </div>
@@ -1930,24 +1976,12 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
                     )}
                   </div>
 
-                  {/* Section 7: Senha do Programa */}
-                  <div className="p-5 rounded-2xl bg-zinc-900/60 border border-white/10 space-y-3">
-                    <div className="flex items-center gap-2 text-white font-bold text-sm border-b border-white/10 pb-2">
-                      <KeyRound className="w-4 h-4 text-emerald-400" />
-                      <span>Senha de Acesso Rápido deste Hotsite</span>
-                    </div>
-                    <div className="max-w-xs">
-                      <label className="block text-xs text-zinc-400 mb-1 font-medium">
-                        Nova Senha do Programa
-                      </label>
-                      <input
-                        type="password"
-                        value={editHostPassword}
-                        onChange={(e) => setEditHostPassword(e.target.value)}
-                        placeholder="senha123"
-                        className="w-full bg-zinc-950 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-emerald-500 font-mono"
-                      />
-                    </div>
+                  {/* Section 7: Segurança vinculada ao Locutor */}
+                  <div className="p-4 rounded-2xl bg-emerald-950/20 border border-emerald-500/25 flex items-center gap-3 text-xs text-emerald-200">
+                    <KeyRound className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>
+                      A senha de edição deste hotsite é pessoal do locutor e pode ser alterada no <strong>Painel do Locutor → Meu Perfil & Senha</strong>.
+                    </span>
                   </div>
 
                   {/* Submit Button Bottom */}
@@ -1968,11 +2002,12 @@ export const ProgramHotsiteModal: React.FC<ProgramHotsiteModalProps> = ({
         </div>
 
         {/* Footer info */}
-        <div className="px-6 py-3.5 bg-zinc-950 border-t border-white/10 flex items-center justify-between text-xs text-zinc-400 shrink-0">
-          <span className="font-mono text-[11px]">Rebeldia FM • 100% Livre</span>
+        <div className="px-4 sm:px-6 py-1.5 bg-zinc-950 border-t border-white/10 flex items-center justify-between text-xs text-zinc-400 shrink-0">
+          <span className="font-mono text-[11px] leading-none">Rebeldia FM • 100% Livre</span>
           <button
+            type="button"
             onClick={onClose}
-            className="px-4 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-bold transition border border-white/10"
+            className="px-3 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-white text-[11px] font-bold leading-tight transition border border-white/10 cursor-pointer"
           >
             Fechar Hotsite
           </button>

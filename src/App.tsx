@@ -53,6 +53,7 @@ import {
   LiveTakeover,
   HostAccount,
   StationLogosConfig,
+  ScheduleSwapRecord,
 } from './types';
 import { InstallModal } from './components/InstallModal';
 import { SongRequestsModal } from './components/SongRequestsModal';
@@ -90,7 +91,14 @@ import { applyTheme, getSavedPaletteId } from './utils/theme';
 import { getSavedInstitutionalData, saveInstitutionalData, InstitutionalData } from './data/institutional';
 import { applyClientSeo } from './utils/seo';
 import { findProgramBySlug, getProgramLogoSrc, getProgramSlug } from './utils/slug';
-import { ensureSystemHosts, findLinkedHostAccount, resolveProgramWhatsapp, isCoringaHost } from './utils/hostPhone';
+import {
+  ensureSystemHosts,
+  findLinkedHostAccount,
+  resolveProgramWhatsapp,
+  isCoringaHost,
+  applyEffectiveSwapsToPrograms,
+  getLocalTodayYmd,
+} from './utils/hostPhone';
 import { LogIn, LogOut, User as UserIcon, Database, ShieldCheck, KeyRound, Flame, Gift, Sparkles as SparklesIcon, UserCheck } from 'lucide-react';
 
 export default function App() {
@@ -146,15 +154,34 @@ export default function App() {
       return null;
     }
   });
+  const [hostToken, setHostToken] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('rebeldia_host_token');
+    } catch {
+      return null;
+    }
+  });
+  const [scheduleSwaps, setScheduleSwaps] = useState<ScheduleSwapRecord[]>([]);
 
-  const handleHostLogin = (host: HostAccount) => {
+  const handleHostLogin = (host: HostAccount, token?: string | null) => {
     setCurrentLoggedInHost(host);
     localStorage.setItem('rebeldia_logged_host', JSON.stringify(host));
+    if (token !== undefined) {
+      if (token) {
+        setHostToken(token);
+        localStorage.setItem('rebeldia_host_token', token);
+      } else {
+        setHostToken(null);
+        localStorage.removeItem('rebeldia_host_token');
+      }
+    }
   };
 
   const handleHostLogout = () => {
     setCurrentLoggedInHost(null);
+    setHostToken(null);
     localStorage.removeItem('rebeldia_logged_host');
+    localStorage.removeItem('rebeldia_host_token');
   };
 
   // Theme & Palette State
@@ -202,7 +229,9 @@ export default function App() {
 
   const resolvedSchedulePrograms = useMemo<ProgramItem[]>(() => {
     const baseList = schedulePrograms.length > 0 ? schedulePrograms : INITIAL_PROGRAMS;
-    return baseList.map((prog) => {
+    const todayYmd = getLocalTodayYmd();
+    const withSwaps = applyEffectiveSwapsToPrograms(baseList, scheduleSwaps, todayYmd);
+    return withSwaps.map((prog) => {
       const linkedHost = findLinkedHostAccount(prog, hostAccounts);
       return {
         ...prog,
@@ -210,7 +239,7 @@ export default function App() {
         whatsappNumber: resolveProgramWhatsapp(prog, hostAccounts, stationConfig.whatsappNumber),
       };
     });
-  }, [schedulePrograms, hostAccounts, stationConfig.whatsappNumber]);
+  }, [schedulePrograms, scheduleSwaps, hostAccounts, stationConfig.whatsappNumber]);
 
   // Client-side cache migration to permanently purge any stale "Canoas" references
   useEffect(() => {
@@ -551,7 +580,18 @@ export default function App() {
   // Load Community Data, Schedule, Promo Banners and Live Takeovers from Cloud SQL Backend API
   const loadBackendData = useCallback(async () => {
     try {
-      const [backendRequests, backendMessages, backendStats, backendSchedule, backendConfig, backendBanners, backendTakeover, backendHosts, backendInstitutional] = await Promise.allSettled([
+      const [
+        backendRequests,
+        backendMessages,
+        backendStats,
+        backendSchedule,
+        backendConfig,
+        backendBanners,
+        backendTakeover,
+        backendHosts,
+        backendInstitutional,
+        backendSwaps,
+      ] = await Promise.allSettled([
         api.getSongRequests(),
         api.getShoutouts(),
         api.getStats(),
@@ -561,7 +601,12 @@ export default function App() {
         api.getLiveTakeover(),
         api.getHostAccounts(),
         api.getInstitutionalData(),
+        api.getScheduleSwaps(),
       ]);
+
+      if (backendSwaps.status === 'fulfilled' && Array.isArray(backendSwaps.value)) {
+        setScheduleSwaps(backendSwaps.value);
+      }
 
       if (backendInstitutional.status === 'fulfilled' && backendInstitutional.value) {
         setInstitutionalData((prev) => ({ ...prev, ...backendInstitutional.value }));
@@ -2361,6 +2406,16 @@ export default function App() {
         onSavePromoBanners={handleSavePromoBanners}
         stationConfig={stationConfig}
         onSaveStationConfig={handleSaveConfig}
+        currentLoggedInHost={currentLoggedInHost}
+        hostToken={hostToken}
+        onHostLogin={handleHostLogin}
+        onHostLogout={handleHostLogout}
+        scheduleSwaps={scheduleSwaps}
+        onSwapsUpdated={setScheduleSwaps}
+        liveTakeover={liveTakeover}
+        currentLiveProgram={currentLiveProgram}
+        onStartTakeover={handleStartTakeover}
+        onStopTakeover={handleStopTakeover}
       />
 
       {/* Promoção da Hora & Banners Modal */}
@@ -2423,6 +2478,7 @@ export default function App() {
           });
         }}
         currentLoggedInHost={currentLoggedInHost}
+        onHostLogin={handleHostLogin}
         onOpenHostAuth={() => {
           setSelectedHotsiteProgram(null);
           setIsHostAuthOpen(true);
@@ -2447,6 +2503,10 @@ export default function App() {
         }}
         onOpenTakeoverModal={(prog, coringaMode) => {
           handleOpenTakeoverForProgram(prog || currentLiveProgram, Boolean(coringaMode));
+        }}
+        onOpenFilteredPanel={() => {
+          setIsHostAuthOpen(false);
+          handleOpenAdmin();
         }}
         liveTakeover={liveTakeover}
         onStopTakeover={handleStopTakeover}

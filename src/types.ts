@@ -46,15 +46,19 @@ export interface ProgramItem {
   whatsappNumber?: string; // Resolvido dinamicamente a partir do perfil do locutor vinculado (ou padrão da rádio)
   highlights?: ProgramHighlight[];
   playlist?: ProgramTrack[];
-  // Autenticação e Vínculo de Locutor
+  // Autenticação e Vínculo de Locutor (senha pertence exclusivamente ao locutor)
   hostAccountId?: string;
-  hostPassword?: string; // Senha direta opcional do programa/hotsite
+  hostPassword?: string; // Campo legado ignorado na autenticação (login exclusivo por celular do locutor)
   // Campos de Substituição / Locutor Online / Modo Coringa
   isSubstituted?: boolean;
   isCoringaActive?: boolean;
   originalHost?: string;
   takeoverNotes?: string;
   isRebDefault?: boolean;
+  // Campos de Troca Pontual ativa no dia
+  swappedNotice?: string;
+  swappedWithTitle?: string;
+  swappedDate?: string;
   // Campos de Banner Promocional vinculado ao programa
   promoActive?: boolean;
   promoBannerUrl?: string;
@@ -65,6 +69,37 @@ export interface ProgramItem {
   promoEndDate?: string;   // YYYY-MM-DDTHH:mm
   promoScheduleSync?: boolean; // Se true, exibe no horário do programa na grade
   seedKey?: string;
+}
+
+export type ScheduleSwapType = 'one_time' | 'permanent';
+
+export interface ScheduleSwapSlotSnapshot {
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  daysLabel?: string;
+}
+
+export interface ScheduleSwapRecord {
+  id: string;
+  type: ScheduleSwapType;
+  targetDate?: string; // YYYY-MM-DD (obrigatório quando type === 'one_time')
+  sourceProgramId: string;
+  sourceProgramTitle: string;
+  sourceHostId?: string;
+  sourceHostName: string;
+  sourceSlot: ScheduleSwapSlotSnapshot;
+  targetProgramId: string;
+  targetProgramTitle: string;
+  targetHostId?: string;
+  targetHostName: string;
+  targetSlot: ScheduleSwapSlotSnapshot;
+  initiatedByHostId?: string;
+  initiatedByHostName: string;
+  note?: string;
+  status: 'active' | 'cancelled' | 'applied';
+  createdAt: number;
+  cancelledAt?: number;
 }
 
 export interface LiveTakeover {

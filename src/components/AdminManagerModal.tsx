@@ -63,7 +63,16 @@ import {
   Save,
 } from 'lucide-react';
 import { api, DbScheduleItem, DbShoutout, DbSongRequest, DbStats } from '../utils/api';
-import { ProgramItem, ActiveTab, PromoBanner, ProgramVideoItem, HostAccount, RadioStationConfig } from '../types';
+import {
+  ProgramItem,
+  ActiveTab,
+  PromoBanner,
+  ProgramVideoItem,
+  HostAccount,
+  RadioStationConfig,
+  ScheduleSwapRecord,
+  LiveTakeover,
+} from '../types';
 import {
   MixcloudRecording,
   resolveMixcloudUserOrQuery,
@@ -78,12 +87,18 @@ import {
 import { LogoUploader } from './LogoUploader';
 import { AdminBannersSection } from './AdminBannersSection';
 import { AdminSeoSection } from './AdminSeoSection';
+import { AdminScheduleSwapsSection } from './AdminScheduleSwapsSection';
+import { AdminHostCoringaSection, AdminHostMyProfileSection } from './AdminHostFilteredSections';
 import { INITIAL_PROMO_BANNERS, DEFAULT_REB_PROGRAM, INITIAL_HOST_ACCOUNTS } from '../data/initialData';
 import {
   ensureSystemHosts,
   isProtectedSystemHost,
   isCoringaHost,
   resolveHostWhatsapp,
+  isHostOwnerOfProgram,
+  findDuplicateHostPhones,
+  formatPhoneDisplay,
+  isValidCellPhone,
 } from '../utils/hostPhone';
 
 interface AdminManagerModalProps {
@@ -95,6 +110,16 @@ interface AdminManagerModalProps {
   onSavePromoBanners?: (banners: PromoBanner[]) => void;
   stationConfig?: RadioStationConfig;
   onSaveStationConfig?: (config: RadioStationConfig) => void;
+  currentLoggedInHost?: HostAccount | null;
+  hostToken?: string | null;
+  onHostLogin?: (host: HostAccount, token?: string | null) => void;
+  onHostLogout?: () => void;
+  scheduleSwaps?: ScheduleSwapRecord[];
+  onSwapsUpdated?: (swaps: ScheduleSwapRecord[]) => void;
+  liveTakeover?: LiveTakeover | null;
+  currentLiveProgram?: ProgramItem | null;
+  onStartTakeover?: (takeover: LiveTakeover) => Promise<void> | void;
+  onStopTakeover?: () => Promise<void> | void;
 }
 
 const DEFAULT_ADMIN_USER = 'admin@rebeldiafm.com';
@@ -243,7 +268,20 @@ const DEFAULT_PROGRAM_FORM: ProgramFormState = {
   promoScheduleSync: true,
 };
 
-type AdminNavSection = 'schedule' | 'new_program' | 'hosts' | 'banners' | 'shoutouts' | 'requests' | 'rebeldia' | 'stats' | 'mixcloud' | 'seo';
+type AdminNavSection =
+  | 'schedule'
+  | 'new_program'
+  | 'coringa'
+  | 'swaps'
+  | 'my_profile'
+  | 'hosts'
+  | 'banners'
+  | 'shoutouts'
+  | 'requests'
+  | 'rebeldia'
+  | 'stats'
+  | 'mixcloud'
+  | 'seo';
 
 export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
   isOpen,
@@ -254,10 +292,37 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
   onSavePromoBanners,
   stationConfig,
   onSaveStationConfig,
+  currentLoggedInHost = null,
+  hostToken = null,
+  onHostLogin,
+  onHostLogout,
+  scheduleSwaps,
+  onSwapsUpdated,
+  liveTakeover = null,
+  currentLiveProgram = null,
+  onStartTakeover,
+  onStopTakeover,
 }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => {
     return Boolean(localStorage.getItem('rebeldia_admin_session'));
   });
+  const authRole: 'admin' | 'host' | null = isAdminAuthenticated
+    ? 'admin'
+    : currentLoggedInHost
+    ? 'host'
+    : null;
+  const isAuthenticated = authRole !== null;
+
+  const [loginMode, setLoginMode] = useState<'host' | 'admin'>('host');
+  const [hostPhoneInput, setHostPhoneInput] = useState('');
+  const [hostPasswordInput, setHostPasswordInput] = useState('');
+  const [localSwaps, setLocalSwaps] = useState<ScheduleSwapRecord[]>(scheduleSwaps || []);
+
+  useEffect(() => {
+    if (scheduleSwaps) {
+      setLocalSwaps(scheduleSwaps);
+    }
+  }, [scheduleSwaps]);
 
   const [metadataDelaySeconds, setMetadataDelaySeconds] = useState<number>(() => {
     if (stationConfig?.metadataDelaySeconds !== undefined) {
@@ -558,16 +623,33 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
     setTimeout(() => setToastMessage(null), 3200);
   };
 
-  // Load Admin Data when authenticated
+  // Load Admin / Host Data when authenticated
   useEffect(() => {
     if (isOpen && isAuthenticated) {
       loadSchedule();
-      loadShoutouts();
-      loadRequests();
-      loadStats();
       loadHostAccounts();
+      loadSwaps();
+      if (authRole === 'admin') {
+        loadShoutouts();
+        loadRequests();
+        loadStats();
+      }
     }
-  }, [isOpen, isAuthenticated]);
+  }, [isOpen, isAuthenticated, authRole]);
+
+  // Enforce filtered section scope when authenticated as host
+  useEffect(() => {
+    if (authRole === 'host') {
+      const allowedHostSections: AdminNavSection[] = ['schedule', 'new_program', 'coringa', 'swaps', 'my_profile'];
+      if (!allowedHostSections.includes(activeSection)) {
+        setActiveSection('schedule');
+        setEditingProgram(null);
+      } else if (activeSection === 'new_program' && editingProgram && !editingProgram.id) {
+        setActiveSection('schedule');
+        setEditingProgram(null);
+      }
+    }
+  }, [authRole, activeSection, editingProgram]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -583,6 +665,16 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose, confirmDialog]);
+
+  const loadSwaps = async () => {
+    try {
+      const data = await api.getScheduleSwaps();
+      setLocalSwaps(data);
+      onSwapsUpdated?.(data);
+    } catch (err) {
+      console.error('Error loading schedule swaps:', err);
+    }
+  };
 
   const loadSchedule = async () => {
     try {
@@ -668,8 +760,8 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
     setIsSavingHost(true);
     try {
       const nextList = hostAccountsList.map((h) => (h.id === updated.id ? updated : h));
-      setHostAccountsList(nextList);
       await api.saveHostAccounts(nextList);
+      setHostAccountsList(nextList);
 
       // Sincroniza automaticamente todos os programas vinculados a este locutor (foto, nome, cargo, whatsapp)
       const linkedPrograms = scheduleList.filter(
@@ -760,8 +852,8 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
       };
 
       const nextList = [...hostAccountsList, newAcc];
-      setHostAccountsList(nextList);
       await api.saveHostAccounts(nextList);
+      setHostAccountsList(nextList);
       showToast(`Locutor ${newAcc.name} cadastrado com sucesso!`);
       setIsAddingNewHost(false);
       setNewHostForm({
@@ -840,21 +932,54 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
       if (res.success) {
         localStorage.setItem('rebeldia_admin_session', res.token);
         localStorage.setItem('rebeldia_admin_open', 'true');
-        setIsAuthenticated(true);
-        showToast('Autenticado com sucesso no painel!');
+        setIsAdminAuthenticated(true);
+        showToast('Autenticado como Admin Geral no painel!');
       }
     } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : 'Usuário ou senha incorretos';
-          setLoginError(message);
-        } finally {
+      const message = err instanceof Error ? err.message : 'Usuário ou senha incorretos';
+      setLoginError(message);
+    } finally {
+      setIsLoadingAuth(false);
+    }
+  };
+
+  const handleHostPanelLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError('');
+    if (!isValidCellPhone(hostPhoneInput)) {
+      setLoginError('Informe seu número de celular com DDD (ex: 48 99999-9999).');
+      return;
+    }
+    setIsLoadingAuth(true);
+
+    try {
+      const res = await api.loginHost(hostPhoneInput.trim(), hostPasswordInput);
+      if (res.success && res.host) {
+        onHostLogin?.(res.host, res.token || null);
+        localStorage.setItem('rebeldia_admin_open', 'true');
+        setActiveSection('schedule');
+        setEditingProgram(null);
+        showToast(`Bem-vindo(a), ${res.host.name}! Painel do Locutor liberado.`);
+      } else {
+        setLoginError(res.error || 'Celular ou senha pessoal incorretos.');
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Erro ao autenticar com seu celular';
+      setLoginError(message);
+    } finally {
       setIsLoadingAuth(false);
     }
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('rebeldia_admin_session');
     localStorage.removeItem('rebeldia_admin_open');
-    setIsAuthenticated(false);
+    if (authRole === 'admin') {
+      localStorage.removeItem('rebeldia_admin_session');
+      setIsAdminAuthenticated(false);
+    } else if (authRole === 'host') {
+      onHostLogout?.();
+    }
+    setEditingProgram(null);
     showToast('Desconectado do painel com sucesso!');
     onClose();
   };
@@ -1508,12 +1633,33 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
     });
   };
 
-  const activeProgramsCount = useMemo(() => scheduleList.filter((p) => p.isActive !== false).length, [scheduleList]);
-  const inactiveProgramsCount = useMemo(() => scheduleList.filter((p) => p.isActive === false).length, [scheduleList]);
+  const roleScopedScheduleList = useMemo(() => {
+    if (authRole === 'admin') return scheduleList;
+    if (authRole === 'host' && currentLoggedInHost) {
+      return scheduleList.filter((prog) =>
+        isHostOwnerOfProgram(currentLoggedInHost, {
+          id: String(prog.id),
+          title: prog.title,
+          host: prog.host,
+          hostAccountId: prog.hostAccountId || undefined,
+        })
+      );
+    }
+    return [];
+  }, [authRole, currentLoggedInHost, scheduleList]);
 
-  // Filtered Programs
+  const activeProgramsCount = useMemo(
+    () => roleScopedScheduleList.filter((p) => p.isActive !== false).length,
+    [roleScopedScheduleList]
+  );
+  const inactiveProgramsCount = useMemo(
+    () => roleScopedScheduleList.filter((p) => p.isActive === false).length,
+    [roleScopedScheduleList]
+  );
+
+  // Filtered Programs (scoped to role)
   const filteredSchedule = useMemo(() => {
-    return scheduleList.filter((prog) => {
+    return roleScopedScheduleList.filter((prog) => {
       const isProgActive = prog.isActive !== false;
       const matchStatus =
         scheduleStatusFilter === 'all' ||
@@ -1527,7 +1673,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
         (prog.genre && prog.genre.toLowerCase().includes(scheduleSearchQuery.toLowerCase()));
       return matchStatus && matchDay && matchSearch;
     });
-  }, [scheduleList, scheduleStatusFilter, scheduleFilterDay, scheduleSearchQuery]);
+  }, [roleScopedScheduleList, scheduleStatusFilter, scheduleFilterDay, scheduleSearchQuery]);
 
   // Counts for Badges
   const pendingShoutoutsCount = shoutoutsList.filter((s) => !s.isApproved).length;
@@ -1599,9 +1745,13 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                   type="button"
                   onClick={() => {
                     loadSchedule();
-                    loadShoutouts();
-                    loadRequests();
-                    loadStats();
+                    loadHostAccounts();
+                    loadSwaps();
+                    if (authRole === 'admin') {
+                      loadShoutouts();
+                      loadRequests();
+                      loadStats();
+                    }
                     showToast('Dados sincronizados com o banco de dados!');
                   }}
                   className="p-2 rounded-xl bg-zinc-800/60 hover:bg-zinc-700 text-zinc-400 hover:text-white border border-zinc-700/50 transition cursor-pointer"
@@ -1638,69 +1788,154 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
         {/* AUTH CHECK: LOGIN SCREEN */}
         {!isAuthenticated ? (
           <div className="flex-1 overflow-y-auto p-6 sm:p-10 flex items-center justify-center">
-            <div className="w-full max-w-md space-y-6">
+            <div className="w-full max-w-md space-y-5">
               <div className="text-center space-y-2">
                 <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mx-auto shadow-xl shadow-amber-500/10">
-                  <KeyRound className="w-8 h-8" />
+                  {loginMode === 'host' ? <Phone className="w-8 h-8" /> : <KeyRound className="w-8 h-8" />}
                 </div>
-                <h3 className="text-2xl font-black text-white font-display">Acesso ao Gerenciador</h3>
+                <h3 className="text-2xl font-black text-white font-display">
+                  {loginMode === 'host' ? 'Painel do Locutor' : 'Acesso Admin Geral'}
+                </h3>
                 <p className="text-xs text-zinc-400">
-                  Autentique-se para gerenciar a grade de programação, os Hotsites dos locutores e moderar os ouvintes.
+                  {loginMode === 'host'
+                    ? 'Entre exclusivamente com o seu número de celular e senha pessoal para gerenciar seus programas, assumir o Coringa e trocar horários.'
+                    : 'Acesso completo da diretoria para gerenciar toda a grade, locutores, banners, SEO e configurações globais.'}
                 </p>
               </div>
 
-              {/* FORMULÁRIO DE LOGIN */}
-              <form onSubmit={handleLogin} className="space-y-4">
-                {loginError && (
-                  <div className="p-3 rounded-xl bg-red-950/60 border border-red-800 text-red-300 text-xs flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{loginError}</span>
-                  </div>
-                )}
-
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
-                    E-mail ou Usuário
-                  </label>
-                  <div className="relative">
-                    <User className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      required
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      placeholder="admin@rebeldiafm.com"
-                      className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs focus:outline-none focus:border-amber-400 transition"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
-                    Senha de Administrador
-                  </label>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="password"
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs focus:outline-none focus:border-amber-400 transition"
-                    />
-                  </div>
-                </div>
-
+              {/* Dual Login Mode Tabs */}
+              <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-zinc-900 border border-zinc-800">
                 <button
-                  type="submit"
-                  disabled={isLoadingAuth}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-black text-xs uppercase tracking-wider transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer disabled:opacity-50"
+                  type="button"
+                  onClick={() => {
+                    setLoginMode('host');
+                    setLoginError('');
+                  }}
+                  className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                    loginMode === 'host'
+                      ? 'bg-emerald-500 text-black shadow-sm font-black'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
                 >
-                  <KeyRound className="w-4 h-4 text-black" />
-                  <span>{isLoadingAuth ? 'Verificando...' : 'Acessar Console de Controle'}</span>
+                  <Phone className="w-3.5 h-3.5" />
+                  <span>Locutor (Celular)</span>
                 </button>
-              </form>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginMode('admin');
+                    setLoginError('');
+                  }}
+                  className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                    loginMode === 'admin'
+                      ? 'bg-amber-500 text-black shadow-sm font-black'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Admin Geral</span>
+                </button>
+              </div>
+
+              {loginError && (
+                <div className="p-3 rounded-xl bg-red-950/60 border border-red-800 text-red-300 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{loginError}</span>
+                </div>
+              )}
+
+              {loginMode === 'host' ? (
+                <form onSubmit={handleHostPanelLogin} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
+                      Número do Celular (com DDD)
+                    </label>
+                    <div className="relative">
+                      <Phone className="w-4 h-4 text-emerald-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="tel"
+                        inputMode="tel"
+                        required
+                        value={hostPhoneInput}
+                        onChange={(e) => setHostPhoneInput(e.target.value)}
+                        placeholder="(48) 99999-9999"
+                        className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs font-mono tabular-nums focus:outline-none focus:border-emerald-400 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
+                      Sua Senha Pessoal
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="password"
+                        required
+                        value={hostPasswordInput}
+                        onChange={(e) => setHostPasswordInput(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs focus:outline-none focus:border-emerald-400 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isLoadingAuth}
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-black font-black text-xs uppercase tracking-wider transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 cursor-pointer disabled:opacity-50"
+                  >
+                    <Phone className="w-4 h-4 text-black" />
+                    <span>{isLoadingAuth ? 'Verificando...' : 'Entrar no Painel do Locutor'}</span>
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
+                      E-mail ou Usuário
+                    </label>
+                    <div className="relative">
+                      <User className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        required
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        placeholder="admin@rebeldiafm.com"
+                        className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs focus:outline-none focus:border-amber-400 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
+                      Senha de Administrador
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="password"
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs focus:outline-none focus:border-amber-400 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isLoadingAuth}
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-black text-xs uppercase tracking-wider transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer disabled:opacity-50"
+                  >
+                    <KeyRound className="w-4 h-4 text-black" />
+                    <span>{isLoadingAuth ? 'Verificando...' : 'Acessar Console Admin Geral'}</span>
+                  </button>
+                </form>
+              )}
             </div>
           </div>
         ) : (
@@ -1712,15 +1947,133 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
               <div className="p-4 border-b border-zinc-800/60 hidden md:block">
                 <div className="p-3 rounded-2xl bg-zinc-900/90 border border-zinc-800 space-y-1">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider">Locutor Conectado</span>
+                    <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider">
+                      {authRole === 'host' ? 'Locutor Conectado' : 'Administrador Conectado'}
+                    </span>
                     <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
                   </div>
-                  <p className="text-xs font-bold text-white truncate">Diretoria de Programação</p>
-                  <span className="text-[10px] text-amber-400 font-mono block">Nível: Super Admin</span>
+                  {authRole === 'host' && currentLoggedInHost ? (
+                    <>
+                      <p className="text-xs font-bold text-white truncate">{currentLoggedInHost.name}</p>
+                      <span className="text-[10px] text-emerald-400 font-mono tabular-nums block">
+                        {formatPhoneDisplay(currentLoggedInHost.whatsapp || '')}
+                      </span>
+                      <span className="text-[10px] text-amber-400 font-mono block">Nível: Locutor</span>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs font-bold text-white truncate">Diretoria de Programação</p>
+                      <span className="text-[10px] text-amber-400 font-mono block">Nível: Super Admin</span>
+                    </>
+                  )}
                 </div>
               </div>
 
               {/* Lateral Submenu Groups */}
+              {authRole === 'host' ? (
+                <nav className="p-3 space-y-2 flex-1">
+                  <span className="px-3 text-[10px] font-black uppercase tracking-widest text-emerald-400 font-mono block mb-2">
+                    Painel do Locutor
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSelectSection('schedule');
+                      setEditingProgram(null);
+                    }}
+                    className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 cursor-pointer ${
+                      activeSection === 'schedule' || activeSection === 'new_program'
+                        ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20 font-black'
+                        : 'text-zinc-300 hover:text-white hover:bg-zinc-900/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Calendar className="w-4 h-4" />
+                      <span>Meus Programas</span>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                        activeSection === 'schedule' || activeSection === 'new_program'
+                          ? 'bg-black/20 text-black'
+                          : 'bg-zinc-800 text-zinc-300'
+                      }`}
+                    >
+                      {roleScopedScheduleList.length}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSelectSection('coringa');
+                      setEditingProgram(null);
+                    }}
+                    className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 cursor-pointer ${
+                      activeSection === 'coringa'
+                        ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20 font-black'
+                        : 'text-zinc-300 hover:text-white hover:bg-zinc-900/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Sparkles className="w-4 h-4 text-amber-400" />
+                      <span>Assumir Coringa</span>
+                    </div>
+                    {liveTakeover?.isActive && (
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-red-600 text-white">
+                        NO AR
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSelectSection('swaps');
+                      setEditingProgram(null);
+                    }}
+                    className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 cursor-pointer ${
+                      activeSection === 'swaps'
+                        ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20 font-black'
+                        : 'text-zinc-300 hover:text-white hover:bg-zinc-900/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Repeat className="w-4 h-4 text-amber-400" />
+                      <span>Troca de Horário</span>
+                    </div>
+                    {localSwaps.filter((s) => s.type === 'one_time' && s.status === 'active').length > 0 && (
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                          activeSection === 'swaps'
+                            ? 'bg-black/20 text-black'
+                            : 'bg-amber-500/20 text-amber-300'
+                        }`}
+                      >
+                        {localSwaps.filter((s) => s.type === 'one_time' && s.status === 'active').length}
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSelectSection('my_profile');
+                      setEditingProgram(null);
+                    }}
+                    className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 cursor-pointer ${
+                      activeSection === 'my_profile'
+                        ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20 font-black'
+                        : 'text-zinc-300 hover:text-white hover:bg-zinc-900/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <User className="w-4 h-4 text-emerald-400" />
+                      <span>Meu Perfil & Senha</span>
+                    </div>
+                  </button>
+                </nav>
+              ) : (
               <nav className="p-3 space-y-6 flex-1">
                 {/* GRUPO 1: PROGRAMAÇÃO & NO AR */}
                 <div className="space-y-1.5">
@@ -1764,6 +2117,33 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                   >
                     <Plus className="w-4 h-4" />
                     <span>Cadastrar Programa</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSelectSection('swaps');
+                      setEditingProgram(null);
+                    }}
+                    className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 cursor-pointer ${
+                      activeSection === 'swaps'
+                        ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20 font-black'
+                        : 'text-zinc-300 hover:text-white hover:bg-zinc-900/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Repeat className="w-4 h-4 text-amber-400" />
+                      <span>Trocas de Horário</span>
+                    </div>
+                    {localSwaps.length > 0 && (
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                          activeSection === 'swaps' ? 'bg-black/20 text-black' : 'bg-amber-500/20 text-amber-300'
+                        }`}
+                      >
+                        {localSwaps.length}
+                      </span>
+                    )}
                   </button>
 
                   {/* Mixcloud & Programas Gravados */}
@@ -1984,6 +2364,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                   </button>
                 </div>
               </nav>
+              )}
 
               {/* Sidebar Footer */}
               <div className="p-3 border-t border-zinc-800/80 bg-zinc-950/60 hidden md:block">
@@ -2006,47 +2387,70 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                     <div>
                       <h3 className="text-base sm:text-lg font-black text-white font-display flex items-center gap-2">
                         <Calendar className="w-5 h-5 text-amber-400" />
-                        Grade de Programação & Hotsites
+                        {authRole === 'host' ? 'Meus Programas & Hotsites' : 'Grade de Programação & Hotsites'}
                       </h3>
                       <p className="text-xs text-zinc-400">
-                        {scheduleList.length} programas cadastrados ({activeProgramsCount} ativos no ar, {inactiveProgramsCount} desativados).
+                        {roleScopedScheduleList.length}{' '}
+                        {authRole === 'host' ? 'programa(s) vinculado(s) a você' : 'programas cadastrados'} ({activeProgramsCount} ativos no ar, {inactiveProgramsCount} desativados).
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={handleSyncOfficialContent}
-                        disabled={isSyncingOfficial}
-                        className="px-3.5 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-amber-500/40 text-amber-400 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                        title="Restaura e publica todos os 24 programas e 17 locutores da ficha cadastral oficial no banco"
-                      >
-                        <Sparkles className="w-4 h-4 text-amber-400" />
-                        <span>{isSyncingOfficial ? 'Publicando...' : 'Publicar Grade Oficial'}</span>
-                      </button>
+                    {authRole === 'admin' ? (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={handleSyncOfficialContent}
+                          disabled={isSyncingOfficial}
+                          className="px-3.5 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-amber-500/40 text-amber-400 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          title="Restaura e publica todos os 24 programas e 17 locutores da ficha cadastral oficial no banco"
+                        >
+                          <Sparkles className="w-4 h-4 text-amber-400" />
+                          <span>{isSyncingOfficial ? 'Publicando...' : 'Publicar Grade Oficial'}</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => handleSelectSection('mixcloud')}
-                        className="px-3.5 py-2.5 rounded-xl bg-blue-950/60 hover:bg-blue-900/80 border border-blue-500/40 text-blue-300 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                        title="Gerenciador Central de Mixcloud para todos os hotsites"
-                      >
-                        <Disc className="w-4 h-4 text-blue-400" />
-                        <span>Mixcloud ({scheduleList.filter((p) => p.mixcloudUser || p.mixcloudUrl).length}/{scheduleList.length})</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectSection('mixcloud')}
+                          className="px-3.5 py-2.5 rounded-xl bg-blue-950/60 hover:bg-blue-900/80 border border-blue-500/40 text-blue-300 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                          title="Gerenciador Central de Mixcloud para todos os hotsites"
+                        >
+                          <Disc className="w-4 h-4 text-blue-400" />
+                          <span>Mixcloud ({scheduleList.filter((p) => p.mixcloudUser || p.mixcloudUrl).length}/{scheduleList.length})</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={handleOpenNewProgram}
-                        className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-black text-xs transition flex items-center gap-1.5 shadow-lg shadow-amber-500/20 cursor-pointer active:scale-95"
-                      >
-                        <Plus className="w-4 h-4 stroke-[2.5]" />
-                        <span>Cadastrar Novo Programa</span>
-                      </button>
-                    </div>
+                        <button
+                          type="button"
+                          onClick={handleOpenNewProgram}
+                          className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-black text-xs transition flex items-center gap-1.5 shadow-lg shadow-amber-500/20 cursor-pointer active:scale-95"
+                        >
+                          <Plus className="w-4 h-4 stroke-[2.5]" />
+                          <span>Cadastrar Novo Programa</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => handleSelectSection('coringa')}
+                          className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-black text-xs transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Sparkles className="w-4 h-4" />
+                          <span>Assumir Coringa</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectSection('swaps')}
+                          className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white font-bold text-xs transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Repeat className="w-4 h-4 text-amber-400" />
+                          <span>Trocar Horário</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Card Destaque: Locutor REB (Curadoria 24h & Locutor Oficial) */}
+                  {/* Card Destaque: Locutor REB (Curadoria 24h & Locutor Oficial) - Somente Admin Geral */}
+                  {authRole === 'admin' && (
                   <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-950/40 via-zinc-950 to-zinc-950 border border-amber-500/40 relative overflow-hidden shadow-lg group">
                     <div className="absolute right-0 top-0 w-64 h-full bg-gradient-to-l from-amber-500/10 to-transparent pointer-events-none" />
                     
@@ -2109,6 +2513,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                       </div>
                     </div>
                   </div>
+                  )}
 
                   {/* Barra de Filtros Rápidos, Status & Busca */}
                   <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
@@ -2124,7 +2529,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                               : 'text-zinc-400 hover:text-white'
                           }`}
                         >
-                          Todos ({scheduleList.length})
+                          Todos ({roleScopedScheduleList.length})
                         </button>
                         <button
                           type="button"
@@ -2166,7 +2571,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                           Dias: Todos
                         </button>
                         {DAYS_MAP.map((d) => {
-                          const count = scheduleList.filter((p) => p.dayOfWeek === d.id).length;
+                          const count = roleScopedScheduleList.filter((p) => p.dayOfWeek === d.id).length;
                           return (
                             <button
                               key={d.id}
@@ -2203,18 +2608,35 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                   {filteredSchedule.length === 0 ? (
                     <div className="p-12 text-center rounded-3xl bg-zinc-950 border border-zinc-800/80 space-y-3">
                       <Radio className="w-10 h-10 text-zinc-600 mx-auto" />
-                      <h4 className="text-sm font-bold text-white">Nenhum programa encontrado</h4>
+                      <h4 className="text-sm font-bold text-white">
+                        {authRole === 'host' && roleScopedScheduleList.length === 0
+                          ? 'Nenhum programa fixo vinculado a você'
+                          : 'Nenhum programa encontrado'}
+                      </h4>
                       <p className="text-xs text-zinc-400 max-w-sm mx-auto">
-                        Altere os filtros de busca ou clique no botão abaixo para cadastrar uma nova atração para a grade.
+                        {authRole === 'host' && roleScopedScheduleList.length === 0
+                          ? 'Você ainda pode assumir a programação ao vivo agora mesmo usando o Modo Coringa.'
+                          : 'Altere os filtros de busca para localizar o programa desejado.'}
                       </p>
-                      <button
-                        type="button"
-                        onClick={handleOpenNewProgram}
-                        className="px-4 py-2 rounded-xl bg-amber-500 text-black font-bold text-xs inline-flex items-center gap-1.5"
-                      >
-                        <Plus className="w-4 h-4" />
-                        <span>Cadastrar Programa Agora</span>
-                      </button>
+                      {authRole === 'admin' ? (
+                        <button
+                          type="button"
+                          onClick={handleOpenNewProgram}
+                          className="px-4 py-2 rounded-xl bg-amber-500 text-black font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>Cadastrar Programa Agora</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleSelectSection('coringa')}
+                          className="px-4 py-2 rounded-xl bg-amber-500 text-black font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Sparkles className="w-4 h-4" />
+                          <span>Assumir Coringa no Ar</span>
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2342,41 +2764,55 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                             {/* Card Bottom: Ações Rápidas */}
                             <div className="flex items-center justify-between pt-2 border-t border-zinc-800/60">
                               <div className="flex items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => handleDuplicateProgram(prog)}
-                                  className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white text-[11px] font-bold transition flex items-center gap-1 border border-zinc-800 cursor-pointer"
-                                  title="Duplicar este programa para outro dia"
-                                >
-                                  <Copy className="w-3 h-3" />
-                                  <span>Clonar</span>
-                                </button>
+                                {authRole === 'admin' ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDuplicateProgram(prog)}
+                                      className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white text-[11px] font-bold transition flex items-center gap-1 border border-zinc-800 cursor-pointer"
+                                      title="Duplicar este programa para outro dia"
+                                    >
+                                      <Copy className="w-3 h-3" />
+                                      <span>Clonar</span>
+                                    </button>
 
-                                {/* Botão Ativar / Desativar Programa */}
-                                <button
-                                  type="button"
-                                  onClick={(e) => handleToggleProgramActive(prog, e)}
-                                  disabled={togglingProgId === prog.id}
-                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 border cursor-pointer ${
-                                    isProgActive
-                                      ? 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border-emerald-800/40 hover:border-emerald-500/60 shadow-sm'
-                                      : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-zinc-700'
-                                  }`}
-                                  title={
-                                    isProgActive
-                                      ? 'Clique para desativar este programa da grade (fora do ar)'
-                                      : 'Clique para ativar este programa na grade da rádio'
-                                  }
-                                >
-                                  {togglingProgId === prog.id ? (
-                                    <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                                  ) : isProgActive ? (
-                                    <Power className="w-3 h-3 text-emerald-400" />
-                                  ) : (
-                                    <PowerOff className="w-3 h-3 text-red-400" />
-                                  )}
-                                  <span>{isProgActive ? 'Ativo' : 'Desativado'}</span>
-                                </button>
+                                    {/* Botão Ativar / Desativar Programa */}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleToggleProgramActive(prog, e)}
+                                      disabled={togglingProgId === prog.id}
+                                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 border cursor-pointer ${
+                                        isProgActive
+                                          ? 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border-emerald-800/40 hover:border-emerald-500/60 shadow-sm'
+                                          : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-zinc-700'
+                                      }`}
+                                      title={
+                                        isProgActive
+                                          ? 'Clique para desativar este programa da grade (fora do ar)'
+                                          : 'Clique para ativar este programa na grade da rádio'
+                                      }
+                                    >
+                                      {togglingProgId === prog.id ? (
+                                        <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                      ) : isProgActive ? (
+                                        <Power className="w-3 h-3 text-emerald-400" />
+                                      ) : (
+                                        <PowerOff className="w-3 h-3 text-red-400" />
+                                      )}
+                                      <span>{isProgActive ? 'Ativo' : 'Desativado'}</span>
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSelectSection('swaps')}
+                                    className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-amber-300 text-[11px] font-bold transition flex items-center gap-1.5 border border-amber-500/30 cursor-pointer"
+                                    title="Solicitar troca pontual ou permanente de horário"
+                                  >
+                                    <Repeat className="w-3 h-3" />
+                                    <span>Trocar Horário</span>
+                                  </button>
+                                )}
                               </div>
 
                               <div className="flex items-center gap-1.5">
@@ -2402,14 +2838,16 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                                   <Edit2 className="w-3.5 h-3.5" />
                                   <span>Editar</span>
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => promptDeleteProgram({ id: prog.id, title: prog.title })}
-                                  className="p-1.5 rounded-xl bg-red-950/30 hover:bg-red-900/60 text-red-400 border border-red-800/30 transition cursor-pointer"
-                                  title="Excluir programa"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                {authRole === 'admin' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => promptDeleteProgram({ id: prog.id, title: prog.title })}
+                                    className="p-1.5 rounded-xl bg-red-950/30 hover:bg-red-900/60 text-red-400 border border-red-800/30 transition cursor-pointer"
+                                    title="Excluir programa"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -2546,7 +2984,8 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                             </p>
                           </div>
 
-                          {/* Status de Ativação do Programa (No Ar / Desativado) */}
+                          {/* Status de Ativação do Programa (No Ar / Desativado) - Somente Admin Geral */}
+                          {authRole === 'admin' && (
                           <div className="p-3.5 sm:p-4 rounded-2xl bg-zinc-900/90 border border-zinc-800 flex items-center justify-between gap-4">
                             <div className="space-y-0.5 min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
@@ -2600,6 +3039,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                               )}
                             </button>
                           </div>
+                          )}
 
                           {/* Nome do Programa */}
                           <div className="space-y-1.5">
@@ -2616,94 +3056,124 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                             />
                           </div>
 
-                          {/* Seletor Visual de Dias da Semana */}
-                          <div className="space-y-2">
-                            <label className="block text-xs font-bold text-zinc-200 uppercase tracking-wider">
-                              Dia da Semana Principal na Grade *
-                            </label>
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                              {DAYS_MAP.map((d) => (
-                                <button
-                                  key={d.id}
-                                  type="button"
-                                  onClick={() => {
-                                    setEditingProgram({
-                                      ...editingProgram,
-                                      dayOfWeek: d.id,
-                                      daysLabel: d.id === -1 ? 'Todos os Dias' : d.id === 1 ? 'Segunda a Sexta' : d.label
-                                    });
-                                  }}
-                                  className={`p-2.5 rounded-xl text-xs font-bold transition border text-left ${
-                                    editingProgram.dayOfWeek === d.id
-                                      ? 'bg-amber-500/20 text-amber-300 border-amber-500'
-                                      : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
-                                  }`}
-                                >
-                                  {d.label}
-                                </button>
-                              ))}
+                          {authRole === 'host' ? (
+                            <div className="p-4 rounded-2xl bg-amber-950/20 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div className="space-y-1">
+                                <span className="text-[11px] font-black uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                                  <Clock className="w-3.5 h-3.5" />
+                                  <span>Horário Oficial na Grade (Promessa Fixa)</span>
+                                </span>
+                                <div className="text-xs text-white font-bold font-mono tabular-nums">
+                                  {editingProgram.daysLabel} • {editingProgram.startTime} – {editingProgram.endTime}
+                                </div>
+                                <p className="text-[11px] text-zinc-400">
+                                  Para alterar seu dia ou horário com outro programa (por 1 dia ou permanente), utilize a guia de Troca de Horário.
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingProgram(null);
+                                  handleSelectSection('swaps');
+                                }}
+                                className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-black text-xs transition flex items-center gap-1.5 shrink-0 cursor-pointer"
+                              >
+                                <Repeat className="w-3.5 h-3.5" />
+                                <span>Precisa trocar de horário?</span>
+                              </button>
                             </div>
-                          </div>
+                          ) : (
+                            <>
+                              {/* Seletor Visual de Dias da Semana */}
+                              <div className="space-y-2">
+                                <label className="block text-xs font-bold text-zinc-200 uppercase tracking-wider">
+                                  Dia da Semana Principal na Grade *
+                                </label>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                  {DAYS_MAP.map((d) => (
+                                    <button
+                                      key={d.id}
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingProgram({
+                                          ...editingProgram,
+                                          dayOfWeek: d.id,
+                                          daysLabel: d.id === -1 ? 'Todos os Dias' : d.id === 1 ? 'Segunda a Sexta' : d.label
+                                        });
+                                      }}
+                                      className={`p-2.5 rounded-xl text-xs font-bold transition border text-left ${
+                                        editingProgram.dayOfWeek === d.id
+                                          ? 'bg-amber-500/20 text-amber-300 border-amber-500'
+                                          : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
+                                      }`}
+                                    >
+                                      {d.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
 
-                          {/* Rótulo de Dias Personalizado */}
-                          <div className="space-y-1.5">
-                            <label className="block text-xs font-bold text-zinc-200 uppercase tracking-wider">
-                              Texto de Exibição dos Dias (no Site)
-                            </label>
-                            <input
-                              type="text"
-                              value={editingProgram.daysLabel}
-                              onChange={(e) => setEditingProgram({ ...editingProgram, daysLabel: e.target.value })}
-                              placeholder="Ex: Segunda a Sexta, Todas as Quintas, Aos Domingos"
-                              className="w-full px-3.5 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs focus:outline-none focus:border-amber-400"
-                            />
-                          </div>
-
-                          {/* Horários com Presets */}
-                          <div className="space-y-2">
-                            <label className="block text-xs font-bold text-zinc-200 uppercase tracking-wider">
-                              Horário de Transmissão (Início e Término) *
-                            </label>
-                            <div className="grid grid-cols-2 gap-3">
-                              <div>
-                                <span className="text-[10px] text-zinc-400 block mb-1">Início (HH:MM):</span>
+                              {/* Rótulo de Dias Personalizado */}
+                              <div className="space-y-1.5">
+                                <label className="block text-xs font-bold text-zinc-200 uppercase tracking-wider">
+                                  Texto de Exibição dos Dias (no Site)
+                                </label>
                                 <input
                                   type="text"
-                                  required
-                                  value={editingProgram.startTime}
-                                  onChange={(e) => setEditingProgram({ ...editingProgram, startTime: e.target.value })}
-                                  placeholder="08:00"
-                                  className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs font-mono font-bold focus:outline-none focus:border-amber-400 text-center"
+                                  value={editingProgram.daysLabel}
+                                  onChange={(e) => setEditingProgram({ ...editingProgram, daysLabel: e.target.value })}
+                                  placeholder="Ex: Segunda a Sexta, Todas as Quintas, Aos Domingos"
+                                  className="w-full px-3.5 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs focus:outline-none focus:border-amber-400"
                                 />
                               </div>
-                              <div>
-                                <span className="text-[10px] text-zinc-400 block mb-1">Término (HH:MM):</span>
-                                <input
-                                  type="text"
-                                  required
-                                  value={editingProgram.endTime}
-                                  onChange={(e) => setEditingProgram({ ...editingProgram, endTime: e.target.value })}
-                                  placeholder="12:00"
-                                  className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs font-mono font-bold focus:outline-none focus:border-amber-400 text-center"
-                                />
-                              </div>
-                            </div>
 
-                            {/* Botões de Horários Rápidos */}
-                            <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                              <span className="text-[10px] text-zinc-500 font-mono">Faixas rápidas:</span>
-                              {TIME_PRESETS.map((t, idx) => (
-                                <button
-                                  key={idx}
-                                  type="button"
-                                  onClick={() => setEditingProgram({ ...editingProgram, startTime: t.start, endTime: t.end })}
-                                  className="px-2 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-[10px] font-mono text-zinc-300 border border-zinc-800"
-                                >
-                                  {t.label}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
+                              {/* Horários com Presets */}
+                              <div className="space-y-2">
+                                <label className="block text-xs font-bold text-zinc-200 uppercase tracking-wider">
+                                  Horário de Transmissão (Início e Término) *
+                                </label>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <span className="text-[10px] text-zinc-400 block mb-1">Início (HH:MM):</span>
+                                    <input
+                                      type="text"
+                                      required
+                                      value={editingProgram.startTime}
+                                      onChange={(e) => setEditingProgram({ ...editingProgram, startTime: e.target.value })}
+                                      placeholder="08:00"
+                                      className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs font-mono font-bold focus:outline-none focus:border-amber-400 text-center"
+                                    />
+                                  </div>
+                                  <div>
+                                    <span className="text-[10px] text-zinc-400 block mb-1">Término (HH:MM):</span>
+                                    <input
+                                      type="text"
+                                      required
+                                      value={editingProgram.endTime}
+                                      onChange={(e) => setEditingProgram({ ...editingProgram, endTime: e.target.value })}
+                                      placeholder="12:00"
+                                      className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs font-mono font-bold focus:outline-none focus:border-amber-400 text-center"
+                                    />
+                                  </div>
+                                </div>
+
+                                {/* Botões de Horários Rápidos */}
+                                <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                                  <span className="text-[10px] text-zinc-500 font-mono">Faixas rápidas:</span>
+                                  {TIME_PRESETS.map((t, idx) => (
+                                    <button
+                                      key={idx}
+                                      type="button"
+                                      onClick={() => setEditingProgram({ ...editingProgram, startTime: t.start, endTime: t.end })}
+                                      className="px-2 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-[10px] font-mono text-zinc-300 border border-zinc-800"
+                                    >
+                                      {t.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </>
+                          )}
 
                           {/* --- SEÇÃO DE REPRISE DO PROGRAMA NA GRADE --- */}
                           <div className="p-4 sm:p-5 rounded-2xl bg-zinc-900/90 border border-zinc-800 space-y-4 shadow-sm">
@@ -2933,7 +3403,8 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                             </p>
                           </div>
 
-                          {/* 1. SELEÇÃO DO LOCUTOR VINCULADO */}
+                          {/* 1. SELEÇÃO DO LOCUTOR VINCULADO (Somente Admin altera titularidade) */}
+                          {authRole === 'admin' && (
                           <div className="p-4 rounded-2xl bg-amber-950/20 border border-amber-500/30 space-y-3">
                             <div className="flex items-center justify-between">
                               <label className="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-2">
@@ -2998,6 +3469,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                               })}
                             </div>
                           </div>
+                          )}
 
                           {/* CARD DO LOCUTOR VINCULADO ATUALMENTE */}
                           {(() => {
@@ -3037,39 +3509,55 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                                       </h5>
                                       <p className="text-xs text-zinc-400 truncate">{currentRole}</p>
                                       <p className="text-[10px] text-zinc-500 font-mono">
-                                        Foto e nome geridos no cadastro de locutores
+                                        Foto, celular e senha geridos no perfil pessoal do locutor
                                       </p>
                                     </div>
                                   </div>
 
                                   <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-                                    {linkedHost && (
+                                    {authRole === 'host' ? (
                                       <button
                                         type="button"
-                                        onClick={() => setEditingHostAccount(linkedHost)}
-                                        className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-amber-400 border border-zinc-700 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                                        title="Alterar a foto ou dados cadastrais deste locutor"
+                                        onClick={() => {
+                                          setEditingProgram(null);
+                                          handleSelectSection('my_profile');
+                                        }}
+                                        className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
                                       >
-                                        <Camera className="w-3.5 h-3.5" />
-                                        <span>Alterar Foto no Cadastro</span>
+                                        <User className="w-3.5 h-3.5" />
+                                        <span>Editar Meu Perfil / Celular</span>
                                       </button>
+                                    ) : (
+                                      <>
+                                        {linkedHost && (
+                                          <button
+                                            type="button"
+                                            onClick={() => setEditingHostAccount(linkedHost)}
+                                            className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-amber-400 border border-zinc-700 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                                            title="Alterar a foto ou dados cadastrais deste locutor"
+                                          >
+                                            <Camera className="w-3.5 h-3.5" />
+                                            <span>Alterar Foto no Cadastro</span>
+                                          </button>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setIsAddingNewHost(true);
+                                            setActiveSection('hosts');
+                                          }}
+                                          className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 text-xs font-medium transition flex items-center gap-1 cursor-pointer"
+                                        >
+                                          <Plus className="w-3.5 h-3.5" />
+                                          <span>Novo Locutor</span>
+                                        </button>
+                                      </>
                                     )}
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setIsAddingNewHost(true);
-                                        setActiveSection('hosts');
-                                      }}
-                                      className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 text-xs font-medium transition flex items-center gap-1 cursor-pointer"
-                                    >
-                                      <Plus className="w-3.5 h-3.5" />
-                                      <span>Novo Locutor</span>
-                                    </button>
                                   </div>
                                 </div>
 
                                 <p className="text-[11px] text-zinc-400 leading-relaxed bg-zinc-950/60 p-2.5 rounded-xl border border-white/5">
-                                  ℹ️ <strong>Importante:</strong> Para manter a integridade visual da emissora, a foto e o nome do locutor são centralizados no cadastro de locutores. Caso atualize a foto dele lá, todos os programas dele serão atualizados automaticamente.
+                                  ℹ️ <strong>Importante:</strong> Para manter a integridade visual da emissora, a foto, o celular de atendimento e a senha são centralizados no perfil do locutor.
                                 </p>
                               </div>
                             );
@@ -4249,17 +4737,41 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                       </div>
                       <div className="text-xs">
                         <div className="font-bold text-white flex items-center gap-2">
-                          <span>Gestão Unificada de Comunicadores</span>
+                          <span>Gestão Unificada de Comunicadores (Login por Celular)</span>
                           <span className="px-2 py-0.2 rounded-full bg-zinc-800 text-zinc-300 text-[10px] font-mono">
                             Humanos & Robô AutoDJ
                           </span>
                         </div>
                         <p className="text-zinc-400 text-[11px] mt-0.5">
-                          Todos os locutores possuem credenciais completas e vínculo com seus programas. O <strong>REB</strong> atua como robô inteligente 24h tocando sempre que não houver locutor ao vivo no ar, gerenciando seus programas fixos.
+                          Cada locutor entra no painel usando exclusivamente seu <strong>celular único + senha pessoal</strong>. O celular também direciona todo o WhatsApp quando o programa ou Coringa entra no ar.
                         </p>
                       </div>
                     </div>
                   </div>
+
+                  {/* Alerta de Telefones Duplicados ou Padrão Compartilhado */}
+                  {(() => {
+                    const dupEntries = Object.entries(findDuplicateHostPhones(hostAccountsList));
+                    if (dupEntries.length === 0) return null;
+                    return (
+                      <div className="p-4 rounded-2xl bg-amber-950/30 border border-amber-500/40 space-y-2">
+                        <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          <span>Atenção: Celulares compartilhados / aguardando cadastro individual ({dupEntries.length} grupo(s))</span>
+                        </div>
+                        <p className="text-[11px] text-zinc-300">
+                          Locutores que ainda compartilham o número padrão ou o mesmo celular não conseguirão fazer login exclusivo por celular até receberem um número individual único:
+                        </p>
+                        <div className="space-y-1">
+                          {dupEntries.map(([phoneKey, hosts]) => (
+                            <div key={phoneKey} className="text-[11px] font-mono text-amber-200 bg-black/40 px-3 py-1.5 rounded-lg border border-amber-500/20">
+                              <strong>{formatPhoneDisplay(hosts[0]?.whatsapp || phoneKey)}:</strong> {hosts.map((h) => h.name).join(', ')}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Busca e Lista de Todos os Locutores */}
                   <div className="space-y-3">
@@ -6293,9 +6805,66 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
               )}
 
               {/* ======================================================== */}
+              {/* SESSÃO: TROCA DIRETA DE HORÁRIO & REGISTRO DE AVISOS     */}
+              {/* ======================================================== */}
+              {activeSection === 'swaps' && (
+                <AdminScheduleSwapsSection
+                  authRole={authRole === 'host' ? 'host' : 'admin'}
+                  activeHost={currentLoggedInHost}
+                  hostToken={hostToken}
+                  scheduleList={scheduleList}
+                  hostAccounts={hostAccountsList}
+                  swaps={localSwaps}
+                  onSwapsUpdated={(nextSwaps) => {
+                    setLocalSwaps(nextSwaps);
+                    onSwapsUpdated?.(nextSwaps);
+                  }}
+                  onRefreshSchedule={async () => {
+                    await loadSchedule();
+                    onRefreshData?.();
+                  }}
+                  showToast={showToast}
+                  stationWhatsapp={stationConfig?.whatsappNumber}
+                />
+              )}
+
+              {/* ======================================================== */}
+              {/* SESSÃO DO LOCUTOR: ASSUMIR CORINGA                       */}
+              {/* ======================================================== */}
+              {activeSection === 'coringa' && authRole === 'host' && currentLoggedInHost && (
+                <AdminHostCoringaSection
+                  activeHost={currentLoggedInHost}
+                  currentLiveProgram={currentLiveProgram}
+                  liveTakeover={liveTakeover}
+                  onStartTakeover={onStartTakeover}
+                  onStopTakeover={onStopTakeover}
+                  stationWhatsapp={stationConfig?.whatsappNumber}
+                  showToast={showToast}
+                />
+              )}
+
+              {/* ======================================================== */}
+              {/* SESSÃO DO LOCUTOR: MEU PERFIL, CELULAR & SENHA PESSOAL   */}
+              {/* ======================================================== */}
+              {activeSection === 'my_profile' && authRole === 'host' && currentLoggedInHost && (
+                <AdminHostMyProfileSection
+                  activeHost={currentLoggedInHost}
+                  hostToken={hostToken}
+                  onProfileUpdated={(updatedHost) => {
+                    onHostLogin?.(updatedHost, hostToken);
+                    setHostAccountsList((prev) =>
+                      prev.map((h) => (h.id === updatedHost.id ? updatedHost : h))
+                    );
+                    onRefreshData?.();
+                  }}
+                  showToast={showToast}
+                />
+              )}
+
+              {/* ======================================================== */}
               {/* SESSÃO: GERENCIADOR DE SEO & GEO (PADRÃO YOAST)          */}
               {/* ======================================================== */}
-              {activeSection === 'seo' && <AdminSeoSection />}
+              {activeSection === 'seo' && authRole === 'admin' && <AdminSeoSection />}
             </main>
           </div>
         )}

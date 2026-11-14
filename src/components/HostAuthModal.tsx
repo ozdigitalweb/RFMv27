@@ -22,19 +22,26 @@ import {
 } from 'lucide-react';
 import { HostAccount, ProgramItem, RadioStationConfig, LiveTakeover } from '../types';
 import { api } from '../utils/api';
-import { isCoringaHost, resolveHostWhatsapp } from '../utils/hostPhone';
-import { GoogleReCaptchaProvider, GoogleReCaptcha, useGoogleReCaptcha } from 'react-google-recaptcha-v3';
+import {
+  formatPhoneDisplay,
+  isCoringaHost,
+  isHostOwnerOfProgram,
+  isValidCellPhone,
+  resolveHostWhatsapp,
+} from '../utils/hostPhone';
+import { GoogleReCaptchaProvider, useGoogleReCaptcha } from 'react-google-recaptcha-v3';
 
 interface HostAuthModalProps {
   isOpen: boolean;
   onClose: () => void;
   programs: ProgramItem[];
   currentLoggedInHost: HostAccount | null;
-  onHostLogin: (host: HostAccount) => void;
+  onHostLogin: (host: HostAccount, token?: string) => void;
   onHostLogout: () => void;
   onSelectProgram?: (program: ProgramItem) => void;
   stationConfig: RadioStationConfig;
   onOpenTakeoverModal?: (program?: ProgramItem, coringaMode?: boolean) => void;
+  onOpenFilteredPanel?: () => void;
   liveTakeover?: LiveTakeover | null;
   onStopTakeover?: () => void;
 }
@@ -59,6 +66,7 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
   onSelectProgram,
   stationConfig,
   onOpenTakeoverModal,
+  onOpenFilteredPanel,
   liveTakeover,
   onStopTakeover,
 }) => {
@@ -70,8 +78,8 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
     }
   }, [isOpen, currentLoggedInHost]);
 
-  // Login form state
-  const [loginIdentifier, setLoginIdentifier] = useState('');
+  // Login form state (exclusivo por celular + senha)
+  const [loginPhone, setLoginPhone] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
@@ -84,7 +92,7 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
   const [regPassword, setRegPassword] = useState('');
   const [regConfirmPassword, setRegConfirmPassword] = useState('');
   const [showRegPassword, setShowRegPassword] = useState(false);
-  const [regWhatsapp, setRegWhatsapp] = useState('5548991984678');
+  const [regWhatsapp, setRegWhatsapp] = useState('');
   const [regProgramIds, setRegProgramIds] = useState<string[]>([]);
   const [regRole, setRegRole] = useState('Locutor Titular');
   const [regSecurityQuestion, setRegSecurityQuestion] = useState(SECURITY_QUESTIONS[0]);
@@ -93,9 +101,9 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
   const [regSuccess, setRegSuccess] = useState('');
   const [regLoading, setRegLoading] = useState(false);
 
-  // Recovery form state
+  // Recovery form state (exclusivo por celular)
   const [recoverStep, setRecoverStep] = useState<1 | 2>(1);
-  const [recoverIdentifier, setRecoverIdentifier] = useState('');
+  const [recoverPhone, setRecoverPhone] = useState('');
   const [recoverQuestion, setRecoverQuestion] = useState('');
   const [recoverName, setRecoverName] = useState('');
   const [recoverAnswer, setRecoverAnswer] = useState('');
@@ -106,69 +114,64 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
   const [recoverSuccess, setRecoverSuccess] = useState('');
   const [recoverLoading, setRecoverLoading] = useState(false);
 
-    // reCAPTCHA state
-    const { executeRecaptcha: executeRecaptchaHook } = useGoogleReCaptcha();
-    const [recaptchaToken, setRecaptchaToken] = useState<string | null>(null);
-    const [recaptchaError, setRecaptchaError] = useState('');
+  const RECAPTCHA_SITE_KEY = (import.meta as any).env?.VITE_RECAPTCHA_SITE_KEY || '';
+  const { executeRecaptcha: executeRecaptchaHook } = useGoogleReCaptcha();
 
-    const executeRecaptcha = async (action: string) => {
-      try {
-        const token = await executeRecaptchaHook(action);
-        setRecaptchaToken(token);
-        setRecaptchaError('');
-        return token;
-      } catch (err) {
-        setRecaptchaError('Erro ao validar reCAPTCHA. Tente novamente.');
-        return null;
-      }
-    };
+  const executeRecaptcha = async (action: string): Promise<string | undefined> => {
+    if (!RECAPTCHA_SITE_KEY || !executeRecaptchaHook) return undefined;
+    try {
+      return await executeRecaptchaHook(action);
+    } catch {
+      return undefined;
+    }
+  };
 
   if (!isOpen) return null;
 
-    // Get reCAPTCHA site key from environment (Vite injects VITE_ vars at build time)
-    const RECAPTCHA_SITE_KEY = (import.meta as any).env?.VITE_RECAPTCHA_SITE_KEY || '';
-
-    const handleLoginSubmit = async (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
-    if (!loginIdentifier.trim() || !loginPassword) {
-      setLoginError('Preencha seu usuário/e-mail e senha');
+    if (!loginPhone.trim() || !loginPassword) {
+      setLoginError('Informe seu número de celular e sua senha pessoal');
+      return;
+    }
+    if (!isValidCellPhone(loginPhone)) {
+      setLoginError('Informe um celular válido com DDD (ex: 48 99198-4678)');
       return;
     }
 
-      // Execute reCAPTCHA before login
-      const token = await executeRecaptcha('login');
-      if (!token) {
-        setLoginError(recaptchaError || 'Erro na verificação de segurança. Tente novamente.');
-        return;
+    const token = await executeRecaptcha('login');
+    setLoginLoading(true);
+    try {
+      const res = await api.loginHost(loginPhone.trim(), loginPassword, undefined, token);
+      if (res.success && res.host) {
+        onHostLogin(res.host, res.token);
+        setActiveTab('profile');
+        setLoginPassword('');
+        setLoginError('');
+      } else {
+        setLoginError(res.error || 'Celular ou senha incorretos');
       }
-
-      setLoginLoading(true);
-      try {
-        const res = await api.loginHost(loginIdentifier.trim(), loginPassword, undefined, token);
-        if (res.success && res.host) {
-          onHostLogin(res.host);
-          setActiveTab('profile');
-          setLoginPassword('');
-          setLoginError('');
-        } else {
-          setLoginError(res.error || 'Credenciais inválidas');
-        }
-      } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Erro ao conectar com o servidor';
-            setLoginError(message);
-          } finally {
-        setLoginLoading(false);
-      }
-    };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Erro ao conectar com o servidor';
+      setLoginError(message);
+    } finally {
+      setLoginLoading(false);
+    }
+  };
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setRegError('');
     setRegSuccess('');
 
-    if (!regName.trim() || !regUsername.trim() || !regEmail.trim() || !regPassword) {
-      setRegError('Preencha todos os campos obrigatórios (*)');
+    if (!regName.trim() || !regWhatsapp.trim() || !regPassword) {
+      setRegError('Nome artístico, número de celular e senha são obrigatórios');
+      return;
+    }
+
+    if (!isValidCellPhone(regWhatsapp)) {
+      setRegError('Informe um número de celular válido com DDD (ex: 48 99198-4678)');
       return;
     }
 
@@ -187,44 +190,41 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
       return;
     }
 
-      // Execute reCAPTCHA before register
-      const token = await executeRecaptcha('register');
-      if (!token) {
-        setRegError(recaptchaError || 'Erro na verificação de segurança. Tente novamente.');
-        return;
-      }
-
-      setRegLoading(true);
-      try {
-        const targetProg = programs.find((p) => regProgramIds.includes(String(p.id)));
-        const res = await api.registerHost({
+    const token = await executeRecaptcha('register');
+    setRegLoading(true);
+    try {
+      const targetProg = programs.find((p) => regProgramIds.includes(String(p.id)));
+      const res = await api.registerHost(
+        {
           name: regName.trim(),
-          username: regUsername.trim(),
-          email: regEmail.trim(),
+          username: regUsername.trim() || undefined,
+          email: regEmail.trim() || undefined,
           password: regPassword,
-          whatsapp: regWhatsapp.trim() || '5548991984678',
+          whatsapp: regWhatsapp.trim(),
           role: regRole.trim(),
           programIds: regProgramIds,
           programId: regProgramIds[0] || undefined,
           programTitle: targetProg?.title || undefined,
           securityQuestion: regSecurityQuestion,
           securityAnswer: regSecurityAnswer.trim(),
-        }, token);
+        },
+        token
+      );
 
-        if (res.success && res.host) {
-          setRegSuccess('Cadastro realizado com sucesso! Você já está autenticado.');
-          onHostLogin(res.host);
-          setTimeout(() => {
-            setActiveTab('profile');
-            setRegSuccess('');
-          }, 1200);
-        } else {
+      if (res.success && res.host) {
+        setRegSuccess('Cadastro realizado com sucesso! Você já está autenticado.');
+        onHostLogin(res.host, res.token);
+        setTimeout(() => {
+          setActiveTab('profile');
+          setRegSuccess('');
+        }, 1200);
+      } else {
         setRegError(res.error || 'Erro ao cadastrar locutor');
       }
     } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : 'Erro ao cadastrar';
-          setRegError(message);
-        } finally {
+      const message = err instanceof Error ? err.message : 'Erro ao cadastrar';
+      setRegError(message);
+    } finally {
       setRegLoading(false);
     }
   };
@@ -234,25 +234,25 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
     setRecoverError('');
     setRecoverSuccess('');
 
-    if (!recoverIdentifier.trim()) {
-      setRecoverError('Informe seu e-mail ou nome de usuário');
+    if (!isValidCellPhone(recoverPhone)) {
+      setRecoverError('Informe seu número de celular cadastrado com DDD');
       return;
     }
 
     setRecoverLoading(true);
     try {
-      const res = await api.recoverHostPassword({ identifier: recoverIdentifier.trim() });
+      const res = await api.recoverHostPassword({ phone: recoverPhone.trim() });
       if (res.success && res.securityQuestion) {
         setRecoverQuestion(res.securityQuestion);
         setRecoverName(res.name || '');
         setRecoverStep(2);
       } else {
-        setRecoverError(res.error || 'Nenhum locutor encontrado com estes dados');
+        setRecoverError(res.error || 'Nenhum locutor encontrado com este celular');
       }
     } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : 'Erro ao buscar dados';
-          setRecoverError(message);
-        } finally {
+      const message = err instanceof Error ? err.message : 'Erro ao buscar dados';
+      setRecoverError(message);
+    } finally {
       setRecoverLoading(false);
     }
   };
@@ -277,57 +277,43 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
       return;
     }
 
-      // Execute reCAPTCHA before recover password
-      const token = await executeRecaptcha('recover');
-      if (!token) {
-        setRecoverError(recaptchaError || 'Erro na verificação de segurança. Tente novamente.');
-        return;
-      }
-
-      setRecoverLoading(true);
-      try {
-        const res = await api.recoverHostPassword({
-          identifier: recoverIdentifier.trim(),
+    const token = await executeRecaptcha('recover');
+    setRecoverLoading(true);
+    try {
+      const res = await api.recoverHostPassword(
+        {
+          phone: recoverPhone.trim(),
           securityAnswer: recoverAnswer.trim(),
           newPassword: recoverNewPassword,
-        }, token);
+        },
+        token
+      );
 
-        if (res.success) {
-          setRecoverSuccess('Senha redefinida com sucesso! Redirecionando para login...');
-          setTimeout(() => {
-            setRecoverStep(1);
-            setRecoverIdentifier('');
-            setRecoverAnswer('');
-            setRecoverNewPassword('');
-            setRecoverConfirmPassword('');
-            setRecoverSuccess('');
-            setActiveTab('login');
-          }, 1800);
-        } else {
-          setRecoverError(res.error || 'Resposta incorreta ou erro ao redefinir');
-        }
-      } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Erro ao redefinir senha';
-            setRecoverError(message);
-          } finally {
-        setRecoverLoading(false);
+      if (res.success) {
+        setRecoverSuccess('Senha redefinida com sucesso! Redirecionando para login...');
+        setTimeout(() => {
+          setRecoverStep(1);
+          setRecoverPhone('');
+          setRecoverAnswer('');
+          setRecoverNewPassword('');
+          setRecoverConfirmPassword('');
+          setRecoverSuccess('');
+          setActiveTab('login');
+        }, 1800);
+      } else {
+        setRecoverError(res.error || 'Resposta incorreta ou erro ao redefinir');
       }
-    };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Erro ao redefinir senha';
+      setRecoverError(message);
+    } finally {
+      setRecoverLoading(false);
+    }
+  };
 
-  // Find all programs associated with current host
-  const hostProgramIds = currentLoggedInHost?.programIds && currentLoggedInHost.programIds.length > 0
-    ? currentLoggedInHost.programIds
-    : currentLoggedInHost?.programId
-    ? [currentLoggedInHost.programId]
+  const linkedPrograms = currentLoggedInHost
+    ? programs.filter((p) => isHostOwnerOfProgram(currentLoggedInHost, p))
     : [];
-
-  const linkedPrograms = programs.filter((p) =>
-    hostProgramIds.includes(String(p.id)) ||
-    (currentLoggedInHost?.name && (
-      p.host.toLowerCase().includes(currentLoggedInHost.name.toLowerCase()) ||
-      currentLoggedInHost.name.toLowerCase().includes(p.host.toLowerCase())
-    ))
-  );
 
   const primaryLinkedProgram = linkedPrograms[0] || null;
 
@@ -445,7 +431,9 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                       Sessão Ativa
                     </span>
-                    <span className="text-xs text-zinc-400 font-mono">@{currentLoggedInHost.username}</span>
+                    <span className="text-xs text-zinc-400 font-mono tabular-nums">
+                      {formatPhoneDisplay(currentLoggedInHost.whatsapp) || `@${currentLoggedInHost.username}`}
+                    </span>
                     {isCoringaHost(currentLoggedInHost) && (
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
                         Perfil Fixo Coringa
@@ -457,12 +445,32 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
                     {currentLoggedInHost.name}
                   </h3>
                   <p className="text-xs text-zinc-400">{currentLoggedInHost.role || 'Locutor da Rebeldia FM'}</p>
-                  <p className="text-xs text-emerald-400 font-mono flex items-center gap-1.5 pt-0.5">
+                  <p className="text-xs text-emerald-400 font-mono tabular-nums flex items-center gap-1.5 pt-0.5">
                     <Phone className="w-3 h-3 shrink-0" />
-                    <span>WhatsApp dos ouvintes: {resolveHostWhatsapp(currentLoggedInHost, stationConfig.whatsappNumber)}</span>
+                    <span>
+                      Celular (Login & WhatsApp no Ar):{' '}
+                      {formatPhoneDisplay(resolveHostWhatsapp(currentLoggedInHost, stationConfig.whatsappNumber))}
+                    </span>
                   </p>
                 </div>
               </div>
+
+              {onOpenFilteredPanel && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenFilteredPanel();
+                  }}
+                  className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-black font-black text-xs uppercase tracking-wider transition flex items-center justify-between gap-3 cursor-pointer shadow-lg shadow-emerald-950/40"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Settings className="w-4 h-4 text-black shrink-0" />
+                    <span>Abrir Painel do Locutor (Meus Programas, Coringa & Troca de Horário)</span>
+                  </div>
+                  <ArrowRight className="w-4 h-4 text-black shrink-0" />
+                </button>
+              )}
 
               {/* LIVE TAKEOVER & TRANSMISSÃO AO VIVO CONTROL BOX */}
               <div className="p-5 rounded-2xl bg-gradient-to-br from-zinc-900 via-zinc-900 to-zinc-950 border border-amber-500/40 space-y-3.5 shadow-xl">
@@ -487,7 +495,7 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
                 <p className="text-xs text-zinc-300 leading-relaxed">
                   {liveTakeover?.isActive
                     ? `Você está no ar como ${liveTakeover.substituteHost}${liveTakeover.isCoringa ? ' (Modo Coringa)' : ''} em "${liveTakeover.coringaProgramTitle || liveTakeover.originProgramTitle}". Clique abaixo para gerenciar ou encerrar sua transmissão.`
-                    : `Use seu próprio perfil como Coringa para entrar no ar sem usar o seu programa (ex.: cobrir a folga de um colega) ou inicie a transmissão do seu programa titular.`}
+                    : `Use seu próprio perfil e celular como Coringa para entrar no ar sem depender do seu programa titular, ou inicie a transmissão do seu programa.`}
                 </p>
 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
@@ -515,7 +523,7 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
                     className="flex-1 py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-black transition flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-amber-500/20"
                   >
                     <Sparkles className="w-4 h-4" />
-                    <span>Virar Coringa (Entrar sem seu Programa)</span>
+                    <span>Virar Coringa (Assumir o Ar)</span>
                   </button>
 
                   {!isCoringaHost(currentLoggedInHost) && (
@@ -545,7 +553,7 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
                       <span>Seus Programas Vinculados ({linkedPrograms.length})</span>
                     </span>
                     <span className="text-[11px] text-zinc-400">
-                      Programas que você apresenta
+                      Programas que você detém
                     </span>
                   </div>
 
@@ -569,7 +577,7 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
                           )}
                           <div className="min-w-0">
                             <h4 className="text-sm font-bold text-white font-display truncate">{lp.title}</h4>
-                            <p className="text-[11px] text-zinc-400 font-mono">
+                            <p className="text-[11px] text-zinc-400 font-mono tabular-nums">
                               {lp.startTime} - {lp.endTime} • {lp.genre}
                             </p>
                           </div>
@@ -592,7 +600,7 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
                 </div>
               ) : (
                 <div className="p-4 rounded-2xl bg-amber-950/20 border border-amber-500/20 text-xs text-amber-300">
-                  Nenhum programa específico está vinculado ao seu usuário ainda. O administrador da rádio pode vincular seus programas no painel de controle.
+                  Nenhum programa específico está vinculado ao seu usuário ainda. Você pode assumir o microfone em <strong>Modo Coringa</strong> ou solicitar o vínculo ao administrador.
                 </div>
               )}
 
@@ -619,13 +627,13 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
             </div>
           )}
 
-          {/* TAB 2: Login */}
+          {/* TAB 2: Login (Exclusivamente Celular + Senha do Locutor) */}
           {activeTab === 'login' && (
             <form onSubmit={handleLoginSubmit} className="space-y-4 animate-fadeIn">
-              <div className="p-3.5 rounded-xl bg-white/5 border border-white/5 text-xs text-zinc-300 flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              <div className="p-3.5 rounded-xl bg-emerald-950/25 border border-emerald-500/30 text-xs text-zinc-200 flex items-center gap-2.5">
+                <Phone className="w-4 h-4 text-emerald-400 shrink-0" />
                 <span>
-                  Entre com seu usuário ou e-mail cadastrado e senha para gerenciar seu hotsite e entrar no ar.
+                  Entre exclusivamente com seu <strong>número de celular cadastrado</strong> e sua <strong>senha pessoal de locutor</strong>.
                 </span>
               </div>
 
@@ -638,16 +646,17 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1.5">
-                  Usuário ou E-mail do Locutor *
+                  Celular do Locutor (com DDD) *
                 </label>
                 <div className="relative">
-                  <User className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <Phone className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
-                    type="text"
-                    value={loginIdentifier}
-                    onChange={(e) => setLoginIdentifier(e.target.value)}
-                    placeholder="Ex: carlos ou carlos@rebeldiafm.com.br"
-                    className="w-full bg-zinc-900 border border-zinc-700 focus:border-white rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-zinc-500 outline-none transition"
+                    type="tel"
+                    inputMode="tel"
+                    value={loginPhone}
+                    onChange={(e) => setLoginPhone(e.target.value)}
+                    placeholder="Ex: (48) 99198-4678 ou 5548991984678"
+                    className="w-full bg-zinc-900 border border-zinc-700 focus:border-emerald-400 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-zinc-500 outline-none transition font-mono tabular-nums"
                     required
                   />
                 </div>
@@ -656,13 +665,13 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
-                    Senha de Acesso *
+                    Senha Pessoal do Locutor *
                   </label>
                   <button
                     type="button"
                     onClick={() => {
                       setActiveTab('recover');
-                      setRecoverIdentifier(loginIdentifier);
+                      setRecoverPhone(loginPhone);
                     }}
                     className="text-[11px] text-zinc-400 hover:text-white underline cursor-pointer"
                   >
@@ -675,8 +684,8 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
                     type={showLoginPassword ? 'text' : 'password'}
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
-                    placeholder="Digite sua senha"
-                    className="w-full bg-zinc-900 border border-zinc-700 focus:border-white rounded-xl pl-10 pr-10 py-2.5 text-sm text-white placeholder-zinc-500 outline-none transition"
+                    placeholder="Digite sua senha pessoal"
+                    className="w-full bg-zinc-900 border border-zinc-700 focus:border-emerald-400 rounded-xl pl-10 pr-10 py-2.5 text-sm text-white placeholder-zinc-500 outline-none transition"
                     required
                   />
                   <button
@@ -754,17 +763,18 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1">
-                    Usuário de Login (Slug) *
+                  <label className="block text-xs font-bold text-emerald-300 uppercase tracking-wider mb-1">
+                    Celular (Login & WhatsApp no Ar) *
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-sm">@</span>
+                    <Phone className="w-4 h-4 text-emerald-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
-                      type="text"
-                      value={regUsername}
-                      onChange={(e) => setRegUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, ''))}
-                      placeholder="carlosrocha"
-                      className="w-full bg-zinc-900 border border-zinc-700 focus:border-white rounded-xl pl-8 pr-3.5 py-2 text-sm text-white placeholder-zinc-500 outline-none transition"
+                      type="tel"
+                      inputMode="tel"
+                      value={regWhatsapp}
+                      onChange={(e) => setRegWhatsapp(e.target.value.replace(/\D/g, ''))}
+                      placeholder="Ex: 48999887766"
+                      className="w-full bg-zinc-900 border border-emerald-500/40 focus:border-emerald-400 rounded-xl pl-9 pr-3.5 py-2 text-sm text-white placeholder-zinc-500 outline-none transition font-mono tabular-nums"
                       required
                     />
                   </div>
@@ -774,7 +784,7 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1">
-                    E-mail Oficial do Locutor *
+                    E-mail do Locutor (Opcional)
                   </label>
                   <div className="relative">
                     <Mail className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -784,32 +794,22 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
                       onChange={(e) => setRegEmail(e.target.value)}
                       placeholder="carlos@rebeldiafm.com.br"
                       className="w-full bg-zinc-900 border border-zinc-700 focus:border-white rounded-xl pl-9 pr-3.5 py-2 text-sm text-white placeholder-zinc-500 outline-none transition"
-                      required
                     />
                   </div>
                 </div>
 
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
-                      WhatsApp para Pedidos
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setRegWhatsapp('5548991984678')}
-                      className="text-[10px] text-amber-400 hover:underline cursor-pointer"
-                    >
-                      Padrão (5548991984678)
-                    </button>
-                  </div>
+                  <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1">
+                    Apelido / Slug (Opcional)
+                  </label>
                   <div className="relative">
-                    <Phone className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-sm">@</span>
                     <input
                       type="text"
-                      value={regWhatsapp}
-                      onChange={(e) => setRegWhatsapp(e.target.value.replace(/\D/g, ''))}
-                      placeholder="5548991984678"
-                      className="w-full bg-zinc-900 border border-zinc-700 focus:border-white rounded-xl pl-9 pr-3.5 py-2 text-sm text-white placeholder-zinc-500 outline-none transition font-mono"
+                      value={regUsername}
+                      onChange={(e) => setRegUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, ''))}
+                      placeholder="carlosrocha"
+                      className="w-full bg-zinc-900 border border-zinc-700 focus:border-white rounded-xl pl-8 pr-3.5 py-2 text-sm text-white placeholder-zinc-500 outline-none transition"
                     />
                   </div>
                 </div>
@@ -1002,22 +1002,26 @@ export const HostAuthModal: React.FC<HostAuthModalProps> = ({
                       Recuperação de Senha do Locutor
                     </p>
                     <p className="text-zinc-400">
-                      Informe o e-mail ou nome de usuário utilizado no cadastro para responder à sua pergunta de segurança e definir uma nova senha.
+                      Informe o número de celular cadastrado com DDD para responder à sua pergunta de segurança e definir uma nova senha pessoal.
                     </p>
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1.5">
-                      E-mail ou Usuário do Locutor *
+                      Celular do Locutor (com DDD) *
                     </label>
-                    <input
-                      type="text"
-                      value={recoverIdentifier}
-                      onChange={(e) => setRecoverIdentifier(e.target.value)}
-                      placeholder="Ex: carlos@rebeldiafm.com.br ou @carlos"
-                      className="w-full bg-zinc-900 border border-zinc-700 focus:border-white rounded-xl px-4 py-2.5 text-sm text-white placeholder-zinc-500 outline-none transition"
-                      required
-                    />
+                    <div className="relative">
+                      <Phone className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="tel"
+                        inputMode="tel"
+                        value={recoverPhone}
+                        onChange={(e) => setRecoverPhone(e.target.value)}
+                        placeholder="Ex: (48) 99198-4678"
+                        className="w-full bg-zinc-900 border border-zinc-700 focus:border-white rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-zinc-500 outline-none transition font-mono tabular-nums"
+                        required
+                      />
+                    </div>
                   </div>
 
                   <div className="pt-2">
