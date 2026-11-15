@@ -1,4 +1,5 @@
 import { PageSeoData } from './api';
+import { applyDynamicFavicon } from './logo';
 
 function setMetaTag(selector: string, attribute: string, value: string, createIfMissing: { tag: string; attrName: string; attrVal: string }) {
   if (typeof document === 'undefined') return;
@@ -19,6 +20,18 @@ export function applyClientSeo(seo: Partial<PageSeoData>) {
   // Title
   if (seo.title) {
     document.title = seo.title;
+  }
+
+  const isOnProgramSlug =
+    typeof window !== 'undefined' &&
+    window.location.pathname.startsWith('/programas/') &&
+    window.location.pathname.replace(/\/+$/, '') !== '/programas';
+
+  // Dynamic Favicon (program logo only on /programas/:slug; mascot on the rest of the site)
+  if (isOnProgramSlug && seo.faviconUrl) {
+    applyDynamicFavicon(seo.faviconUrl);
+  } else {
+    applyDynamicFavicon('/reb_mascot.jpg');
   }
 
   // Meta Description
@@ -52,7 +65,12 @@ export function applyClientSeo(seo: Partial<PageSeoData>) {
   // OpenGraph
   const ogTitle = seo.ogTitle || seo.title || 'Rebeldia FM';
   const ogDescription = seo.ogDescription || seo.description || '';
-  const ogImage = seo.ogImage || '/reb_mascot.jpg';
+  const rawOgImage = isOnProgramSlug ? (seo.ogImage || '/reb_mascot.jpg') : '/reb_mascot.jpg';
+  const safeOgImage = rawOgImage.startsWith('data:') ? '/reb_mascot.jpg' : rawOgImage;
+  const ogImage =
+    safeOgImage.startsWith('/') && typeof window !== 'undefined'
+      ? `${window.location.origin}${safeOgImage}`
+      : safeOgImage;
   const ogType = seo.ogType || 'website';
 
   setMetaTag('meta[property="og:title"]', 'content', ogTitle, { tag: 'meta', attrName: 'property', attrVal: 'og:title' });

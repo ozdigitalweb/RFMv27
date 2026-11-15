@@ -139,11 +139,19 @@ export const LiveProgramHeroCard: React.FC<LiveProgramHeroCardProps> = ({
                 Reprise
               </span>
             )}
+
+            {/* Indicador de Modo Coringa Ativo */}
+            {program.isCoringaActive && (
+              <span className="px-2.5 py-0.5 rounded-lg bg-amber-500 text-black text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-lg font-mono">
+                <Sparkles className="w-3 h-3 text-black" />
+                Coringa Ao Vivo
+              </span>
+            )}
           </div>
 
           {/* Logo Oficial do Programa ampliado no canto superior direito */}
           {program.logoUrl && (
-            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-zinc-950/90 backdrop-blur-md p-1.5 sm:p-2 border border-white/20 shadow-2xl flex items-center justify-center overflow-hidden shrink-0 group-hover:border-amber-400/60 transition">
+            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-black/50 backdrop-blur-md p-[3px] shadow-2xl flex items-center justify-center overflow-hidden shrink-0 transition">
               <img
                 src={program.logoUrl}
                 alt={`Logo ${program.title}`}
@@ -196,10 +204,17 @@ export const LiveProgramHeroCard: React.FC<LiveProgramHeroCardProps> = ({
               <h4 className="text-sm font-bold text-white group-hover:text-amber-300 transition truncate">
                 {program.host}
               </h4>
-              {program.hostBio && (
-                <p className="text-[11px] text-zinc-400 line-clamp-1">
-                  {program.hostBio}
+              {program.isSubstituted && program.originalHost && program.id !== 'coringa-live-session' ? (
+                <p className="text-[11px] text-amber-300/90 line-clamp-1">
+                  {program.isCoringaActive ? 'Modo Coringa • ' : 'Substituindo '}
+                  {program.originalHost}
                 </p>
+              ) : (
+                program.hostBio && (
+                  <p className="text-[11px] text-zinc-400 line-clamp-1">
+                    {program.hostBio}
+                  </p>
+                )
               )}
             </div>
           </div>

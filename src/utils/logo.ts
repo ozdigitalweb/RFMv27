@@ -23,16 +23,20 @@ export function getStationLogos(): StationLogosConfig {
 export function applyDynamicFavicon(faviconUrl?: string | null): void {
   if (typeof document === 'undefined') return;
   const rawUrl = (faviconUrl && faviconUrl.trim().length > 0) ? faviconUrl.trim() : '/reb_mascot.jpg';
-  const url = rawUrl.startsWith('data:') ? rawUrl : `${rawUrl}?v=${Date.now()}`;
-  
+  const isRelativePath = rawUrl.startsWith('/');
+  const url = isRelativePath
+    ? `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}v=${Date.now()}`
+    : rawUrl;
+
   let linkIcon = document.querySelector<HTMLLinkElement>("link[rel='icon']");
   if (!linkIcon) {
     linkIcon = document.createElement('link');
     linkIcon.rel = 'icon';
     document.head.appendChild(linkIcon);
   }
+  linkIcon.removeAttribute('type');
   linkIcon.href = url;
-  
+
   let linkShortcut = document.querySelector<HTMLLinkElement>("link[rel='shortcut icon']");
   if (!linkShortcut) {
     linkShortcut = document.createElement('link');
@@ -82,8 +86,14 @@ export async function fetchAndSyncServerLogos(): Promise<StationLogosConfig | nu
         localStorage.removeItem(LOGO_STORAGE_KEY);
       } catch {}
 
-      // Apply dynamic DOM elements
-      if (merged.faviconIcon) applyDynamicFavicon(merged.faviconIcon);
+      // Apply dynamic DOM elements (only mascot outside /programas/:slug; program hotsite manages its own logo favicon)
+      const isOnProgramSlug =
+        typeof window !== 'undefined' &&
+        window.location.pathname.startsWith('/programas/') &&
+        window.location.pathname.replace(/\/+$/, '') !== '/programas';
+      if (!isOnProgramSlug) {
+        applyDynamicFavicon('/reb_mascot.jpg');
+      }
       if (merged.windowsTaskbarIcon) applyDynamicWindowsTile(merged.windowsTaskbarIcon);
 
       window.dispatchEvent(
@@ -121,8 +131,14 @@ export function saveStationLogos(updated: Partial<StationLogosConfig>): void {
     localStorage.removeItem(LOGO_STORAGE_KEY);
   } catch {}
 
-  // Apply immediately to HTML DOM head
-  if (merged.faviconIcon) applyDynamicFavicon(merged.faviconIcon);
+  // Apply immediately to HTML DOM head (preserve program logo favicon when on /programas/:slug)
+  const isOnProgramSlug =
+    typeof window !== 'undefined' &&
+    window.location.pathname.startsWith('/programas/') &&
+    window.location.pathname.replace(/\/+$/, '') !== '/programas';
+  if (!isOnProgramSlug) {
+    applyDynamicFavicon('/reb_mascot.jpg');
+  }
   if (merged.windowsTaskbarIcon) applyDynamicWindowsTile(merged.windowsTaskbarIcon);
 
   // Broadcast updates

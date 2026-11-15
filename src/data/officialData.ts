@@ -16,6 +16,20 @@ export const OFFICIAL_HOSTS: HostAccount[] = [
     "status": "active"
   },
   {
+    "id": "host-coringa",
+    "name": "Coringa",
+    "username": "coringa",
+    "email": "coringa@rebeldiafm.com.br",
+    "password": "senha123",
+    "role": "Perfil Fixo de Plantão & Cobertura (Coringa)",
+    "bio": "Perfil fixo coringa da Rebeldia FM. Permite que qualquer locutor entre no ar sem usar o seu programa titular — ideal para cobrir folgas de colegas ou fazer plantões especiais com o seu próprio perfil e WhatsApp.",
+    "avatarUrl": "/reb_mascot.jpg",
+    "isFixedCoringa": true,
+    "whatsapp": "5548991984678",
+    "createdAt": 1725619200000,
+    "status": "active"
+  },
+  {
     "id": "host-tais-castro",
     "name": "Tais Castro",
     "username": "taiscastro",

@@ -30,9 +30,6 @@ export const CardBackgroundVisualizer: React.FC<VisualizerBackgroundProps> = ({
   const animationFrameRef = useRef<number | null>(null);
   const peaksRef = useRef<number[]>([]);
   const peakHoldTimeRef = useRef<number[]>([]);
-  const phaseRef = useRef<number>(0);
-  const beatPulseRef = useRef<number>(0);
-  const baselineEnergyRef = useRef<number>(90);
 
   // Resize canvas to match the parent container dimensions precisely
   useEffect(() => {
@@ -84,53 +81,11 @@ export const CardBackgroundVisualizer: React.FC<VisualizerBackgroundProps> = ({
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const isMobile = (width / dpr) < 640;
 
-      const freqData = radioAudio.getFrequencyData();
-      const timeData = radioAudio.getTimeDomainData();
-      const levels = radioAudio.getAudioLevels();
+      const metrics = radioAudio.getBeatMetrics();
+      const { freqData, timeData, levels, bands, bandRanges, beatPulse, tempoPhase: phase, hasLiveSpectrum } = metrics;
 
       const isAudible = isPlaying && !isBuffering && !isMuted && volume > 0;
-      const hasRealAudio = isAudible && freqData && freqData.some((v) => v > 0);
-
-      // Transient beat tracking: detect kick & snare attacks from real frequency spectrum
-      let kick = 0;
-      for (let b = 0; b < 4; b++) kick += (freqData && freqData[b]) || 0;
-      kick = kick / 4;
-
-      let snare = 0;
-      for (let s = 16; s < 26; s++) snare += (freqData && freqData[s]) || 0;
-      snare = snare / 10;
-
-      const instantEnergy = kick * 0.78 + snare * 0.22;
-      let beatImpact = 0;
-
-      if (hasRealAudio && instantEnergy > 10) {
-        baselineEnergyRef.current = baselineEnergyRef.current * 0.96 + instantEnergy * 0.04;
-        const diff = instantEnergy - baselineEnergyRef.current;
-        const threshold = Math.max(10, baselineEnergyRef.current * 0.10);
-        if (diff > threshold) {
-          const rawSpike = (diff - threshold) / Math.max(20, baselineEnergyRef.current * 0.45);
-          beatImpact = Math.min(1.0, Math.max(0, rawSpike));
-        } else {
-          beatImpact = Math.max(0, (instantEnergy / (baselineEnergyRef.current * 1.5)) * 0.22);
-        }
-      } else if (isAudible) {
-        // Dynamic rhythmic fallback matching 124 BPM beat pulse
-        const tempoCycle = (Math.sin(phaseRef.current * 2.8) + 1) * 0.5;
-        beatImpact = Math.pow(tempoCycle, 4);
-      }
-
-      // Fast attack, musical decay
-      if (beatImpact > beatPulseRef.current) {
-        beatPulseRef.current = beatPulseRef.current * 0.15 + beatImpact * 0.85;
-      } else {
-        beatPulseRef.current = beatPulseRef.current * 0.82;
-      }
-      const beatPulse = beatPulseRef.current;
-
-      // Phase accelerates dynamically with musical rhythm
-      const phaseSpeed = isAudible ? (0.028 + beatPulse * 0.055) : 0.025;
-      phaseRef.current += phaseSpeed;
-      const phase = phaseRef.current;
+      const hasRealAudio = isAudible && (hasLiveSpectrum || metrics.isAudible);
 
       // -------------------------------------------------------------
       // MODE 1: BARRAS EM TODA A EXTENSÃO DO FUNDO (Spanning entire width)
@@ -164,11 +119,11 @@ export const CardBackgroundVisualizer: React.FC<VisualizerBackgroundProps> = ({
                 ((val / 255) * (height * (isMobile ? 0.65 : 0.72))) * eqFactor
               );
             } else {
-              const bufferWave = Math.sin(phase * 2.8 + i * 0.3);
-              barHeight = Math.max(8 * dpr, ((bufferWave + 1) / 2) * (height * 0.45) * (0.5 + beatPulse * 0.5));
+              const bufferWave = Math.sin(phase * 2.0 + i * 0.3);
+              barHeight = Math.max(8 * dpr, ((bufferWave + 1) / 2) * (height * 0.45) * (0.45 + beatPulse * 0.55));
             }
           } else if (isBuffering) {
-            const bufferWave = Math.sin(phase * 3.5 + i * 0.35);
+            const bufferWave = Math.sin(phase * 3.0 + i * 0.35);
             barHeight = Math.max(
               6 * dpr,
               ((bufferWave + 1) / 2) * (height * 0.3)
@@ -244,47 +199,20 @@ export const CardBackgroundVisualizer: React.FC<VisualizerBackgroundProps> = ({
         const centerY = isMobile ? height * 0.38 : height * 0.50;
         const segmentCount = isMobile ? 80 : 120;
 
-        // Calculate instantaneous rhythm and energy across 5 acoustic frequency bands
-        let subBassEnergy = 0;
-        let bassEnergy = 0;
-        let midEnergy = 0;
-        let highMidEnergy = 0;
-        let highEnergy = 0;
+        const {
+          subBass: subBassEnergy,
+          bass: bassEnergy,
+          mid: midEnergy,
+          highMid: highMidEnergy,
+          high: highEnergy,
+        } = bands;
 
-        if (freqData && freqData.length > 0) {
-          const bins = freqData.length;
-          // Sub-bass (20-80Hz)
-          const b1 = Math.min(5, bins);
-          for (let b = 0; b < b1; b++) subBassEnergy += freqData[b];
-          subBassEnergy = subBassEnergy / (Math.max(1, b1) * 255);
-
-          // Bass / Groove (80-250Hz)
-          const b2 = Math.min(14, bins);
-          for (let b = 5; b < b2; b++) bassEnergy += freqData[b];
-          bassEnergy = bassEnergy / (Math.max(1, b2 - 5) * 255);
-
-          // Mid-range / Vocals (250-1500Hz)
-          const b3 = Math.min(30, bins);
-          for (let m = 14; m < b3; m++) midEnergy += freqData[m];
-          midEnergy = midEnergy / (Math.max(1, b3 - 14) * 255);
-
-          // High-mids / Percussion (1500-5000Hz)
-          const b4 = Math.min(55, bins);
-          for (let h = 30; h < b4; h++) highMidEnergy += freqData[h];
-          highMidEnergy = highMidEnergy / (Math.max(1, b4 - 30) * 255);
-
-          // Highs / Air & Cymbals (5000-16000Hz)
-          const b5 = Math.min(90, bins);
-          for (let a = 55; a < b5; a++) highEnergy += freqData[a];
-          highEnergy = highEnergy / (Math.max(1, b5 - 55) * 255);
-        }
-
-        // 5 Cordas Coloridas Harmônicas do VU em Onda:
-        // 1. Ciano Elétrico Neon (Sub-bass / Kick)
-        // 2. Verde Esmeralda Neon (Grave / Bassline)
-        // 3. Âmbar Dourado (Médios / Vocais)
-        // 4. Rosa Choque / Magenta (Médios-Agudos / Ataque)
-        // 5. Roxo Ultravioleta (Agudos Cristalinos / Ar)
+        // 5 Cordas Coloridas Harmônicas do VU em Onda (cada uma isolada em sua faixa real de Hz):
+        // 1. Ciano Elétrico Neon (Sub-bass / Kick: 30-110 Hz)
+        // 2. Verde Esmeralda Neon (Grave / Bassline: 110-280 Hz)
+        // 3. Âmbar Dourado (Médios / Vocais e Guitarras: 280-1500 Hz)
+        // 4. Rosa Choque / Magenta (Médios-Agudos / Caixa e Presença: 1500-4500 Hz)
+        // 5. Roxo Ultravioleta (Agudos / Pratos e Ar: 4500-12000 Hz)
         const waveStrings = [
           {
             id: 'subbass',
@@ -294,11 +222,12 @@ export const CardBackgroundVisualizer: React.FC<VisualizerBackgroundProps> = ({
             lineWidth: 2.8,
             shadowBlur: 11,
             energy: subBassEnergy,
+            range: bandRanges[0],
             harmonic: 1.8,
             phaseShift: 0,
-            freqRatio: 0.12,
-            yWeight: 1.1,
+            yWeight: 1.15,
             timeRate: 0.9,
+            pcmWeight: 0.36,
           },
           {
             id: 'bass',
@@ -308,11 +237,12 @@ export const CardBackgroundVisualizer: React.FC<VisualizerBackgroundProps> = ({
             lineWidth: 2.5,
             shadowBlur: 10,
             energy: bassEnergy,
+            range: bandRanges[1],
             harmonic: 2.6,
             phaseShift: Math.PI * 0.4,
-            freqRatio: 0.3,
-            yWeight: -0.9,
+            yWeight: -0.95,
             timeRate: 1.15,
+            pcmWeight: 0.32,
           },
           {
             id: 'mid',
@@ -322,11 +252,12 @@ export const CardBackgroundVisualizer: React.FC<VisualizerBackgroundProps> = ({
             lineWidth: 2.8,
             shadowBlur: 12,
             energy: midEnergy,
+            range: bandRanges[2],
             harmonic: 3.4,
             phaseShift: Math.PI * 0.8,
-            freqRatio: 0.55,
-            yWeight: 0.8,
+            yWeight: 0.9,
             timeRate: 1.35,
+            pcmWeight: 0.42,
           },
           {
             id: 'highmid',
@@ -336,11 +267,12 @@ export const CardBackgroundVisualizer: React.FC<VisualizerBackgroundProps> = ({
             lineWidth: 2.4,
             shadowBlur: 9,
             energy: highMidEnergy,
+            range: bandRanges[3],
             harmonic: 4.6,
             phaseShift: Math.PI * 1.2,
-            freqRatio: 0.75,
-            yWeight: -0.75,
+            yWeight: -0.82,
             timeRate: 1.6,
+            pcmWeight: 0.28,
           },
           {
             id: 'high',
@@ -350,24 +282,28 @@ export const CardBackgroundVisualizer: React.FC<VisualizerBackgroundProps> = ({
             lineWidth: 2.2,
             shadowBlur: 9,
             energy: highEnergy,
+            range: bandRanges[4],
             harmonic: 6.0,
             phaseShift: Math.PI * 1.6,
-            freqRatio: 0.92,
-            yWeight: 0.6,
+            yWeight: 0.72,
             timeRate: 1.9,
+            pcmWeight: 0.22,
           },
         ];
 
         // Base responsive amplitude
         const baseWaveHeight = isMobile
-          ? Math.min(height * 0.25, width * 0.28)
-          : height * 0.27;
+          ? Math.min(height * 0.24, width * 0.26)
+          : height * 0.28;
 
-        // Compute points for each colored wave string
+        // Compute points for each colored wave string strictly from its own isolated frequency band
         const computedStrings: { cfg: typeof waveStrings[0]; points: { x: number; y: number }[] }[] = [];
 
         for (const strCfg of waveStrings) {
           const points: { x: number; y: number }[] = [];
+          const bandStart = Math.max(0, Math.min(freqData.length - 1, strCfg.range.startBin));
+          const bandEnd = Math.max(bandStart + 1, Math.min(freqData.length, strCfg.range.endBin));
+          const bandSpan = Math.max(1, bandEnd - bandStart);
 
           for (let i = 0; i <= segmentCount; i++) {
             const x = (i / segmentCount) * width;
@@ -376,49 +312,45 @@ export const CardBackgroundVisualizer: React.FC<VisualizerBackgroundProps> = ({
 
             let y = centerY;
 
-            if (isAudible && timeData) {
+            if (isAudible && timeData && freqData) {
               const dataIdx = Math.min(
                 timeData.length - 1,
                 Math.floor(normalizedI * timeData.length)
               );
               const pcmVal = (timeData[dataIdx] - 128) / 128;
 
-              const freqIdx = Math.min(
-                (freqData?.length || 1) - 1,
-                Math.floor(normalizedI * (freqData?.length || 1) * strCfg.freqRatio)
-              );
-              const freqVal = ((freqData && freqData[freqIdx]) || 0) / 255;
+              // Map horizontally across THIS string's own isolated FFT bin range (symmetric from center)
+              const centerDist = Math.abs(normalizedI * 2 - 1);
+              const exactBin = bandStart + centerDist * (bandSpan - 1);
+              const binLo = Math.min(freqData.length - 1, Math.floor(exactBin));
+              const binHi = Math.min(freqData.length - 1, binLo + 1);
+              const frac = exactBin - binLo;
+              const localBinVal = (((freqData[binLo] || 0) * (1 - frac) + (freqData[binHi] || 0) * frac) / 255);
 
+              // Drive deflection strictly by THIS band's real spectral energy + local bin shape (0 in silence)
+              const bandDrive = strCfg.energy * 0.65 + Math.min(1, localBinVal * 1.15) * 0.35;
               const harmonicOsc = Math.sin(
                 normalizedI * Math.PI * strCfg.harmonic +
-                pcmVal * 2.2 +
                 phase * strCfg.timeRate +
                 strCfg.phaseShift
               );
 
-              // Wave amplitude directly tracks string energy and beats!
-              const stringAmp = baseWaveHeight * (0.32 + strCfg.energy * 0.95 + beatPulse * 0.65) * edgeEnvelope;
-              const pcmOffset = pcmVal * (baseWaveHeight * 0.45) * edgeEnvelope;
-              const freqOffset = (freqVal - 0.5) * (baseWaveHeight * 0.32) * edgeEnvelope * (strCfg.yWeight > 0 ? 1 : -1);
+              const stringDeflection = harmonicOsc * (baseWaveHeight * 1.18 * bandDrive) * strCfg.yWeight;
+              const pcmDeflection = hasLiveSpectrum
+                ? pcmVal * (baseWaveHeight * strCfg.pcmWeight * (0.22 + strCfg.energy * 0.95))
+                : pcmVal * (baseWaveHeight * 0.14 * strCfg.energy);
 
-              y = centerY +
-                harmonicOsc * stringAmp * strCfg.yWeight +
-                pcmOffset +
-                freqOffset;
+              y = centerY + (stringDeflection + pcmDeflection) * edgeEnvelope;
             } else if (isBuffering) {
               const buffWave = Math.sin(
-                phase * (3.8 + strCfg.timeRate) +
+                phase * (2.4 + strCfg.timeRate * 0.4) +
                 normalizedI * Math.PI * strCfg.harmonic +
                 strCfg.phaseShift
-              ) * (baseWaveHeight * 0.45) * edgeEnvelope;
+              ) * (baseWaveHeight * 0.25) * edgeEnvelope;
               y = centerY + buffWave * strCfg.yWeight;
             } else {
-              const restWave = Math.sin(
-                phase * 1.6 +
-                normalizedI * Math.PI * (1.5 + strCfg.harmonic * 0.4) +
-                strCfg.phaseShift
-              ) * (baseWaveHeight * 0.15) * edgeEnvelope;
-              y = centerY + restWave * strCfg.yWeight;
+              // Quiet idle rest line when paused or muted
+              y = centerY;
             }
 
             points.push({ x, y });
