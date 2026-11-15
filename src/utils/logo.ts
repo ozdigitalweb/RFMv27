@@ -4,9 +4,7 @@ import { StationLogosConfig } from '../types';
 const LOGO_STORAGE_KEY = 'rebeldia_custom_logo';
 const MULTI_LOGOS_STORAGE_KEY = 'rebeldia_station_logos';
 
-let inMemoryLogo: string | null = null;
 let inMemoryLogos: StationLogosConfig | null = null;
-let hasSyncedWithServer = false;
 
 export const DEFAULT_STATION_LOGOS: StationLogosConfig = {
   headerLogo: '/reb_mascot.jpg',
@@ -19,38 +17,7 @@ export const DEFAULT_STATION_LOGOS: StationLogosConfig = {
 
 export function getStationLogos(): StationLogosConfig {
   if (typeof window === 'undefined') return { ...DEFAULT_STATION_LOGOS };
-  if (inMemoryLogos !== null) return inMemoryLogos;
-
-  try {
-    const saved = localStorage.getItem(MULTI_LOGOS_STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      inMemoryLogos = {
-        headerLogo: parsed.headerLogo || localStorage.getItem(LOGO_STORAGE_KEY) || DEFAULT_STATION_LOGOS.headerLogo,
-        headerComplementText: parsed.headerComplementText ?? DEFAULT_STATION_LOGOS.headerComplementText,
-        playerCenterLogo: parsed.playerCenterLogo || DEFAULT_STATION_LOGOS.playerCenterLogo,
-        footerLogo: parsed.footerLogo || DEFAULT_STATION_LOGOS.footerLogo,
-        windowsTaskbarIcon: parsed.windowsTaskbarIcon || DEFAULT_STATION_LOGOS.windowsTaskbarIcon,
-        faviconIcon: parsed.faviconIcon || DEFAULT_STATION_LOGOS.faviconIcon,
-      };
-      return inMemoryLogos;
-    }
-  } catch (e) {
-    console.error('Error reading station logos from storage:', e);
-  }
-
-  // Fallback to legacy single logo if present
-  const legacyLogo = localStorage.getItem(LOGO_STORAGE_KEY);
-  inMemoryLogos = {
-    ...DEFAULT_STATION_LOGOS,
-    headerLogo: legacyLogo || DEFAULT_STATION_LOGOS.headerLogo,
-  };
-
-  if (!hasSyncedWithServer) {
-    fetchAndSyncServerLogos();
-  }
-
-  return inMemoryLogos;
+  return inMemoryLogos ?? { ...DEFAULT_STATION_LOGOS };
 }
 
 export function applyDynamicFavicon(faviconUrl?: string | null): void {
@@ -86,7 +53,7 @@ export function applyDynamicFavicon(faviconUrl?: string | null): void {
 export function applyDynamicWindowsTile(iconUrl?: string | null): void {
   if (typeof document === 'undefined') return;
   const url = (iconUrl && iconUrl.trim().length > 0) ? iconUrl.trim() : '/reb_mascot.jpg';
-  
+
   let tileMeta = document.querySelector<HTMLMetaElement>("meta[name='msapplication-TileImage']");
   if (!tileMeta) {
     tileMeta = document.createElement('meta');
@@ -98,23 +65,22 @@ export function applyDynamicWindowsTile(iconUrl?: string | null): void {
 
 export async function fetchAndSyncServerLogos(): Promise<StationLogosConfig | null> {
   if (typeof window === 'undefined') return null;
-  hasSyncedWithServer = true;
   try {
-    const res = await fetch('/api/station-logos');
+    const res = await fetch('/api/station-logos', { cache: 'no-store' });
     if (res.ok) {
       const serverLogos: StationLogosConfig = await res.json();
-      const current = getStationLogos();
       const merged: StationLogosConfig = {
-        ...current,
-        ...serverLogos,
+        ...DEFAULT_STATION_LOGOS,
+        ...(serverLogos || {}),
       };
 
       inMemoryLogos = merged;
-      localStorage.setItem(MULTI_LOGOS_STORAGE_KEY, JSON.stringify(merged));
 
-      if (merged.headerLogo) {
-        localStorage.setItem(LOGO_STORAGE_KEY, merged.headerLogo);
-      }
+      // Clear any legacy localStorage logo caches
+      try {
+        localStorage.removeItem(MULTI_LOGOS_STORAGE_KEY);
+        localStorage.removeItem(LOGO_STORAGE_KEY);
+      } catch {}
 
       // Apply dynamic DOM elements
       if (merged.faviconIcon) applyDynamicFavicon(merged.faviconIcon);
@@ -151,13 +117,9 @@ export function saveStationLogos(updated: Partial<StationLogosConfig>): void {
   inMemoryLogos = merged;
 
   try {
-    localStorage.setItem(MULTI_LOGOS_STORAGE_KEY, JSON.stringify(merged));
-    if (merged.headerLogo) {
-      localStorage.setItem(LOGO_STORAGE_KEY, merged.headerLogo);
-    }
-  } catch (e) {
-    console.error('Error saving logos to localStorage:', e);
-  }
+    localStorage.removeItem(MULTI_LOGOS_STORAGE_KEY);
+    localStorage.removeItem(LOGO_STORAGE_KEY);
+  } catch {}
 
   // Apply immediately to HTML DOM head
   if (merged.faviconIcon) applyDynamicFavicon(merged.faviconIcon);

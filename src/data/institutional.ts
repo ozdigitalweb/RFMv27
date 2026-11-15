@@ -128,36 +128,13 @@ export const DEFAULT_INSTITUTIONAL_DATA: InstitutionalData = {
 const STORAGE_KEY_INSTITUTIONAL = 'rebeldia_institutional_data_v2';
 
 export function getSavedInstitutionalData(): InstitutionalData {
-  if (typeof window === 'undefined') return DEFAULT_INSTITUTIONAL_DATA;
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY_INSTITUTIONAL);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      let needsResave = false;
-      if (!parsed.location || parsed.location.toLowerCase().includes('canoas')) {
-        parsed.location = 'Florianópolis / SC, Brasil • Transmissão Global Web & App';
-        needsResave = true;
-      }
-      if (!parsed.studioAddress || parsed.studioAddress.toLowerCase().includes('canoas')) {
-        parsed.studioAddress = 'Estúdio Central Rebeldia • Florianópolis / SC, Brasil';
-        needsResave = true;
-      }
-      if (needsResave) {
-        localStorage.setItem(STORAGE_KEY_INSTITUTIONAL, JSON.stringify(parsed));
-      }
-      return { ...DEFAULT_INSTITUTIONAL_DATA, ...parsed };
-    }
-  } catch (e) {
-    console.error('Error loading institutional data:', e);
-  }
   return DEFAULT_INSTITUTIONAL_DATA;
 }
 
-export function saveInstitutionalData(data: InstitutionalData): void {
+export function saveInstitutionalData(_data: InstitutionalData): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY_INSTITUTIONAL, JSON.stringify(data));
-  } catch (e) {
-    console.error('Error saving institutional data:', e);
-  }
+    localStorage.removeItem(STORAGE_KEY_INSTITUTIONAL);
+    localStorage.removeItem('rebeldia_institutional_data');
+  } catch {}
 }

@@ -78,6 +78,9 @@ import {
 import { LogoUploader } from './LogoUploader';
 import { AdminBannersSection } from './AdminBannersSection';
 import { AdminSeoSection } from './AdminSeoSection';
+import { AdminScheduleSwapsSection } from './AdminScheduleSwapsSection';
+import { AdminHostCoringaSection, AdminHostMyProfileSection } from './AdminHostFilteredSections';
+import { MarqueeText } from './MarqueeText';
 import { INITIAL_PROMO_BANNERS, DEFAULT_REB_PROGRAM, INITIAL_HOST_ACCOUNTS } from '../data/initialData';
 
 interface AdminManagerModalProps {
@@ -257,13 +260,6 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
     if (stationConfig?.metadataDelaySeconds !== undefined) {
       return stationConfig.metadataDelaySeconds;
     }
-    try {
-      const saved = localStorage.getItem('rebeldia_station_config');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.metadataDelaySeconds !== undefined) return Number(parsed.metadataDelaySeconds);
-      }
-    } catch {}
     return 10;
   });
 
@@ -321,20 +317,19 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
   // Promo Banners State
   const [bannersList, setBannersList] = useState<PromoBanner[]>(promoBanners);
 
-  // Sync banners from props or API
+  // Sync banners from props
   useEffect(() => {
-    if (promoBanners && promoBanners.length > 0) {
+    if (Array.isArray(promoBanners)) {
       setBannersList(promoBanners);
     }
   }, [promoBanners]);
 
-  const handleSaveBannersList = (updated: PromoBanner[]) => {
+  const handleSaveBannersList = async (updated: PromoBanner[]) => {
     setBannersList(updated);
     if (onSavePromoBanners) {
-      onSavePromoBanners(updated);
+      await onSavePromoBanners(updated);
     } else {
-      localStorage.setItem('rebeldia_promo_banners', JSON.stringify(updated));
-      api.savePromoBanners(updated).catch(() => {});
+      await api.savePromoBanners(updated);
     }
   };
 
@@ -560,6 +555,22 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
       loadRequests();
       loadStats();
       loadHostAccounts();
+      loadSwaps();
+      if (authRole === 'admin') {
+        loadShoutouts();
+        loadRequests();
+        loadStats();
+        api.getInstitutionalData().then((inst) => {
+          if (inst) {
+            setInstitutionalForm((prev) => ({ ...prev, ...inst }));
+          }
+        }).catch(() => {});
+        api.getPromoBanners().then((banners) => {
+          if (Array.isArray(banners)) {
+            setBannersList(banners);
+          }
+        }).catch(() => {});
+      }
     }
   }, [isOpen, isAuthenticated]);
 
@@ -1448,18 +1459,12 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
 
       // Salva retardo no stationConfig
       if (onSaveStationConfig && stationConfig) {
-        onSaveStationConfig({
+        await onSaveStationConfig({
           ...stationConfig,
           metadataDelaySeconds,
         });
       } else {
         await api.saveStationConfig({ metadataDelaySeconds });
-        try {
-          const saved = localStorage.getItem('rebeldia_station_config');
-          const parsed = saved ? JSON.parse(saved) : {};
-          parsed.metadataDelaySeconds = metadataDelaySeconds;
-          localStorage.setItem('rebeldia_station_config', JSON.stringify(parsed));
-        } catch {}
       }
 
       showToast('Dados institucionais e retardo de sincronia salvos!');
@@ -5249,10 +5254,12 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                                 </span>
                               </div>
 
-                              <div className="text-sm font-bold text-white flex items-center gap-2">
-                                <span className="text-amber-400">🎵</span>
-                                <span>{req.songTitle}</span>
-                                <span className="text-zinc-400 font-normal">— {req.artist}</span>
+                              <div className="text-sm font-bold text-white flex items-center gap-2 min-w-0">
+                                <span className="text-amber-400 shrink-0">🎵</span>
+                                <div className="min-w-0 max-w-xs sm:max-w-sm">
+                                  <MarqueeText text={req.songTitle} align="left" />
+                                </div>
+                                <span className="text-zinc-400 font-normal shrink-0">— {req.artist}</span>
                               </div>
 
                               {req.dedicatedTo && (

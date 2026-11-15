@@ -103,9 +103,9 @@ export const InstallModal: React.FC<InstallModalProps> = ({
               )}
             </div>
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 pr-10">
             <h2 className="text-xl font-bold text-white font-display flex items-center gap-2">
-              {platform === 'ios' ? 'Instalar no iPhone / Apple' : 'Instalar no Android'}
+              {platform === 'ios' ? 'Instalar no iPhone' : 'Instalar no Android'}
               {platform === 'ios' ? (
                 <AppleIcon className="w-5 h-5 text-white shrink-0" />
               ) : (

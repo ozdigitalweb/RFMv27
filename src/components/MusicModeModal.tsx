@@ -12,6 +12,8 @@ import {
   Minimize,
 } from 'lucide-react';
 import { CardBackgroundVisualizer } from './Visualizer';
+import { radioAudio } from '../utils/audioEngine';
+import { MarqueeText } from './MarqueeText';
 
 interface MusicModeModalProps {
   isOpen: boolean;
@@ -199,12 +201,9 @@ export const MusicModeModal: React.FC<MusicModeModalProps> = ({
       {/* Centro Estável e Perfeitamente Alinhado: Nome da Música & Controles */}
       <main className="relative z-10 w-full h-full flex flex-col items-center justify-center text-center px-4 sm:px-8 max-w-4xl mx-auto space-y-6 sm:space-y-8 pointer-events-auto">
         {/* Nome da Música & Artista */}
-        <div className="space-y-2.5 sm:space-y-3 px-2 max-w-3xl shrink-0">
-          <h1
-            className="text-2xl sm:text-4xl md:text-6xl font-black text-white font-display tracking-tight leading-tight drop-shadow-[0_6px_30px_rgba(0,0,0,0.9)] line-clamp-2"
-            title={displaySong}
-          >
-            {displaySong}
+        <div className="w-full space-y-2.5 sm:space-y-3 px-[5px] sm:px-2 max-w-3xl shrink-0">
+          <h1 className="w-full text-2xl sm:text-4xl md:text-6xl font-black text-white font-display tracking-tight leading-tight drop-shadow-[0_6px_30px_rgba(0,0,0,0.9)]">
+            <MarqueeText text={displaySong} align="center" title={displaySong} />
           </h1>
 
           {/* Nome do Artista com padrão de cor do site */}

@@ -31,6 +31,7 @@ import { SongRequest, RadioStationConfig, ProgramItem } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../utils/api';
 import { searchMusicDatabase, getArtistReleaseBio, MusicTrackResult } from '../services/musicApi';
+import { MarqueeText } from './MarqueeText';
 
 interface SongRequestsModalProps {
   requests: SongRequest[];
@@ -913,9 +914,9 @@ export const SongRequestsModal: React.FC<SongRequestsModalProps> = ({
                                   <Music className="w-5 h-5 text-zinc-400" />
                                 </div>
                               )}
-                              <div className="min-w-0">
-                                <h5 className="text-xs font-bold text-white truncate group-hover:text-cyan-300 transition">
-                                  {track.title}
+                              <div className="min-w-0 flex-1">
+                                <h5 className="text-xs font-bold text-white group-hover:text-cyan-300 transition">
+                                  <MarqueeText text={track.title} align="left" />
                                 </h5>
                                 <p className="text-[11px] text-zinc-400 truncate">
                                   {track.artist}
@@ -989,8 +990,8 @@ export const SongRequestsModal: React.FC<SongRequestsModalProps> = ({
                               </span>
                             )}
                           </div>
-                          <h5 className="text-xs font-bold text-white truncate">
-                            {selectedTrack.title}
+                          <h5 className="text-xs font-bold text-white">
+                            <MarqueeText text={selectedTrack.title} align="left" />
                           </h5>
                           <p className="text-[11px] text-cyan-200 font-medium truncate">
                             🎤 Banda / Artista: <strong className="text-white">{selectedTrack.artist}</strong>
@@ -1316,9 +1317,9 @@ export const SongRequestsModal: React.FC<SongRequestsModalProps> = ({
                           </div>
                         )}
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-base font-black text-white truncate font-display">
-                              {req.songTitle}
+                          <div className="flex items-center gap-2 min-w-0">
+                            <h4 className="min-w-0 flex-1 text-base font-black text-white font-display">
+                              <MarqueeText text={req.songTitle} align="left" />
                             </h4>
                             {effectivePreview && (
                               <button

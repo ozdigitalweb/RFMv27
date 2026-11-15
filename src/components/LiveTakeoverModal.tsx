@@ -35,8 +35,8 @@ interface LiveTakeoverModalProps {
   currentScheduledProgram: ProgramItem | null;
   programs: ProgramItem[];
   liveTakeover: LiveTakeover | null;
-  onStartTakeover: (takeover: LiveTakeover) => void;
-  onStopTakeover: () => void;
+  onStartTakeover: (takeover: LiveTakeover) => Promise<void> | void;
+  onStopTakeover: () => Promise<void> | void;
   stationConfig: RadioStationConfig;
 }
 
@@ -169,6 +169,57 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
   const [customWhatsapp, setCustomWhatsapp] = useState(stationConfig.whatsappNumber || '5548991984678');
   const [takeoverNotes, setTakeoverNotes] = useState('');
   const [isCustomMode, setIsCustomMode] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Sincroniza estado ao abrir o modal (priorizando o perfil do locutor logado no Modo Coringa)
+  useEffect(() => {
+    if (!isOpen) return;
+    setFormError('');
+    const loggedIsCoringa = isCoringaHost(currentLoggedInHost);
+    const shouldStartCoringa = Boolean(initialCoringaMode || loggedIsCoringa);
+    setIsCoringaMode(shouldStartCoringa);
+    setCoverScheduleProgram(Boolean(currentScheduledProgram && !currentScheduledProgram.isRebDefault));
+    setCoringaProgramTitle('Plantão Coringa');
+    setIsCustomMode(false);
+    setTakeoverNotes('');
+
+    let defaultHostItem: AvailableHostItem | undefined;
+    if (currentLoggedInHost && !loggedIsCoringa) {
+      defaultHostItem = availableHosts.find(
+        (h) => h.id === currentLoggedInHost.id || h.host.toLowerCase() === currentLoggedInHost.name.toLowerCase()
+      );
+    }
+    if (!defaultHostItem && shouldStartCoringa) {
+      defaultHostItem = availableHosts.find((h) => !h.isRobot) || availableHosts[0];
+    }
+    if (!defaultHostItem && currentScheduledProgram?.host) {
+      defaultHostItem = availableHosts.find((h) => h.host.toLowerCase() === currentScheduledProgram.host.toLowerCase());
+    }
+    if (!defaultHostItem) {
+      defaultHostItem = availableHosts[0];
+    }
+
+    if (defaultHostItem) {
+      setSelectedHostPreset(defaultHostItem.host);
+      setCustomHostName(defaultHostItem.host);
+      setCustomHostRole(defaultHostItem.hostRole || 'Locutor Online • Apresentação Especial');
+      setCustomAvatarUrl(defaultHostItem.avatarUrl || '');
+      setCustomWhatsapp(defaultHostItem.whatsappNumber || stationConfig.whatsappNumber || '5548991984678');
+      if (defaultHostItem.programs.length > 0) {
+        const chosen = defaultHostItem.programs[0];
+        setSelectedProgramTitle(chosen.title);
+        setSelectedProgramId(chosen.id);
+      } else {
+        setSelectedProgramTitle(currentScheduledProgram?.title || 'REB - 24hs NOAR');
+        setSelectedProgramId(currentScheduledProgram?.id || 'reb-default-auto');
+      }
+    }
+  }, [isOpen, initialCoringaMode, currentLoggedInHost, currentScheduledProgram, availableHosts, stationConfig.whatsappNumber]);
+
+  const selectedHostData = useMemo(() => {
+    return availableHosts.find((h) => h.host === selectedHostPreset) || availableHosts[0] || null;
+  }, [availableHosts, selectedHostPreset]);
 
   // Handle Preset Host Selection
   const handleSelectHostPreset = (hostName: string) => {
@@ -195,7 +246,7 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
 
   const activeSubstitute = liveTakeover?.isActive ? liveTakeover : null;
 
-  const handleLaunchTakeover = (e: React.FormEvent) => {
+  const handleLaunchTakeover = async (e: React.FormEvent) => {
     e.preventDefault();
 
     let finalHost = customHostName.trim();
@@ -223,6 +274,43 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
 
     const isRobotHost = finalHost.toLowerCase() === 'reb' || finalHost.toLowerCase().includes('autodj');
 
+    if (isCoringaMode) {
+      const cleanCoringaTitle = coringaProgramTitle.trim() || 'Plantão Coringa';
+      const coringaRole = finalRole.toLowerCase().includes('coringa')
+        ? finalRole
+        : `${finalRole || 'Locutor'} • Modo Coringa`;
+
+      const newTakeover: LiveTakeover = {
+        isActive: true,
+        substituteHost: finalHost,
+        substituteHostId: finalHostId,
+        substituteHostRole: coringaRole,
+        substituteAvatarUrl: finalAvatar || undefined,
+        substituteWhatsapp: finalWhatsapp || stationConfig.whatsappNumber || '5548991984678',
+        originProgramTitle: coverScheduleProgram
+          ? currentScheduledProgram?.title || cleanCoringaTitle
+          : cleanCoringaTitle,
+        targetProgramId: coverScheduleProgram ? targetProgId : undefined,
+        takeoverType: 'coringa',
+        isCoringa: true,
+        coverScheduleProgram,
+        coringaProgramTitle: coverScheduleProgram ? undefined : cleanCoringaTitle,
+        notes: takeoverNotes.trim() || undefined,
+        startedAt: Date.now(),
+      };
+
+      setIsSubmitting(true);
+      try {
+        await onStartTakeover(newTakeover);
+        onClose();
+      } catch (err: unknown) {
+        setFormError(err instanceof Error ? err.message : 'Erro ao salvar entrada ao vivo no servidor.');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
     const newTakeover: LiveTakeover = {
       isActive: true,
       substituteHost: finalHost,
@@ -236,8 +324,15 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
       startedAt: Date.now(),
     };
 
-    onStartTakeover(newTakeover);
-    onClose();
+    setIsSubmitting(true);
+    try {
+      await onStartTakeover(newTakeover);
+      onClose();
+    } catch (err: unknown) {
+      setFormError(err instanceof Error ? err.message : 'Erro ao salvar entrada ao vivo no servidor.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -372,14 +467,24 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
               )}
 
               <button
-                onClick={() => {
-                  onStopTakeover();
-                  onClose();
+                type="button"
+                disabled={isSubmitting}
+                onClick={async () => {
+                  setFormError('');
+                  setIsSubmitting(true);
+                  try {
+                    await onStopTakeover();
+                    onClose();
+                  } catch (err: unknown) {
+                    setFormError(err instanceof Error ? err.message : 'Erro ao encerrar plantão no servidor.');
+                  } finally {
+                    setIsSubmitting(false);
+                  }
                 }}
-                className="w-full py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-black transition flex items-center justify-center gap-2 shadow-lg cursor-pointer"
+                className="w-full py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-black transition flex items-center justify-center gap-2 shadow-lg cursor-pointer disabled:opacity-50"
               >
                 <PowerOff className="w-4 h-4" />
-                <span>Encerrar Substituição e Devolver ao Titular ({currentScheduledProgram?.host || 'REB'})</span>
+                <span>{isSubmitting ? 'Salvando...' : `Encerrar Plantão e Devolver ao Titular (${currentScheduledProgram?.host || 'REB'})`}</span>
               </button>
             </div>
           )}

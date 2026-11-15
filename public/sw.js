@@ -17,8 +17,14 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Pass through audio streaming requests to avoid caching live streams
-  if (event.request.url.includes(':6806') || event.request.url.includes('stream') || event.request.url.includes('hdradios')) {
+  // Never intercept non-GET, API calls, or live audio streams
+  if (
+    event.request.method !== 'GET' ||
+    event.request.url.includes('/api/') ||
+    event.request.url.includes(':6806') ||
+    event.request.url.includes('stream') ||
+    event.request.url.includes('hdradios')
+  ) {
     return;
   }
   // Standard network first fetch
