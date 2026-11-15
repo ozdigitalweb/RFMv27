@@ -485,9 +485,6 @@ export default function App() {
     const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isAppInstalled, setIsAppInstalled] = useState(false);
 
-  // Host Accounts (Cadastro de Locutores) State
-  const [hostAccounts, setHostAccounts] = useState<HostAccount[]>(INITIAL_HOST_ACCOUNTS);
-
   // Live Song Artwork state (fetched from iTunes when a real song is on air)
   const [liveSongArtwork, setLiveSongArtwork] = useState<string | null>(null);
 
