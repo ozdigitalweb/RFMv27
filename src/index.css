@@ -217,6 +217,27 @@
   transform-origin: center center;
 }
 
+/* Slow back-and-forth (ping-pong) marquee for song titles */
+@keyframes marqueePingPong {
+  0%, 15% {
+    transform: translateX(0);
+  }
+  45%, 60% {
+    transform: translateX(var(--marquee-offset, 0px));
+  }
+  90%, 100% {
+    transform: translateX(0);
+  }
+}
+
+.animate-marquee-pingpong {
+  animation: marqueePingPong var(--marquee-duration, 10s) ease-in-out infinite;
+}
+
+.animate-marquee-pingpong:hover {
+  animation-play-state: paused;
+}
+
 /* ==========================================================================
    LIGHT MODE THEME OVERRIDES (html[data-theme-mode="light"])
    ========================================================================== */

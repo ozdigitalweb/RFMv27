@@ -71,6 +71,9 @@ export const AdminHostCoringaSection: React.FC<AdminHostCoringaSectionProps> = (
       };
       await onStartTakeover(payload);
       showToast(`Você assumiu o ar como Coringa com seu celular (${formatPhoneDisplay(hostPhone)})!`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erro ao gravar Coringa no servidor.';
+      showToast(msg);
     } finally {
       setIsSaving(false);
     }
@@ -82,6 +85,9 @@ export const AdminHostCoringaSection: React.FC<AdminHostCoringaSectionProps> = (
     try {
       await onStopTakeover();
       showToast('Modo Coringa encerrado. Grade titular restaurada.');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erro ao encerrar Coringa no servidor.';
+      showToast(msg);
     } finally {
       setIsSaving(false);
     }

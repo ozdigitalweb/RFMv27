@@ -3,19 +3,44 @@ import React from 'react';
 interface AndroidIconProps {
   className?: string;
   size?: number | string;
+  monochrome?: boolean;
 }
 
 /**
  * Android Mascot (Full Body) matching the user's provided graphic:
  * - Antennas angled outward with rounded tips
- * - Green dome head with glossy highlight and white circular eyes
- * - Horizontal neck divider
- * - Torso with curved two-tone glossy green highlight
- * - Pill-shaped arms and legs
+ * - Dome head with white/cutout circular eyes
+ * - Torso, pill-shaped arms and legs
  */
 export const AndroidIcon: React.FC<AndroidIconProps> = ({
   className = 'w-5 h-5',
+  monochrome = false,
 }) => {
+  if (monochrome) {
+    return (
+      <svg
+        viewBox="0 0 100 115"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        className={`inline-block shrink-0 ${className}`}
+        aria-hidden="true"
+      >
+        <g>
+          <line x1="34" y1="17" x2="25" y2="4" stroke="currentColor" strokeWidth="4.5" strokeLinecap="round" />
+          <line x1="66" y1="17" x2="75" y2="4" stroke="currentColor" strokeWidth="4.5" strokeLinecap="round" />
+          <path d="M23 34 C23 18 34.5 13 50 13 C65.5 13 77 18 77 34 Z" fill="currentColor" />
+          <circle cx="36.5" cy="25" r="3.2" fill="#09090b" />
+          <circle cx="63.5" cy="25" r="3.2" fill="#09090b" />
+          <path d="M23 38.5 H77 V73 C77 78 72.5 82 67 82 H33 C27.5 82 23 78 23 73 Z" fill="currentColor" />
+          <rect x="10.5" y="38.5" width="9.5" height="32" rx="4.75" fill="currentColor" />
+          <rect x="80" y="38.5" width="9.5" height="32" rx="4.75" fill="currentColor" />
+          <rect x="33.5" y="82" width="10" height="23" rx="5" fill="currentColor" />
+          <rect x="56.5" y="82" width="10" height="23" rx="5" fill="currentColor" />
+        </g>
+      </svg>
+    );
+  }
+
   return (
     <svg
       viewBox="0 0 100 115"

@@ -75,7 +75,7 @@ export interface DbStats {
 export const api = {
   async getSongRequests(): Promise<DbSongRequest[]> {
     try {
-      const res = await fetch('/api/song-requests');
+      const res = await fetch('/api/song-requests', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data)) return data;
@@ -147,7 +147,7 @@ export const api = {
 
   async getShoutouts(): Promise<DbShoutout[]> {
     try {
-      const res = await fetch('/api/shoutouts');
+      const res = await fetch('/api/shoutouts', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data)) return data;
@@ -204,7 +204,7 @@ export const api = {
 
   async getSchedule(): Promise<DbScheduleItem[]> {
     try {
-      const res = await fetch('/api/schedule');
+      const res = await fetch('/api/schedule', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
@@ -269,7 +269,7 @@ export const api = {
   },
 
   async getStats(): Promise<DbStats> {
-    const res = await fetch('/api/stats');
+    const res = await fetch('/api/stats', { cache: 'no-store' });
     if (!res.ok) throw new Error('Failed to fetch stats');
     return res.json();
   },
@@ -289,7 +289,7 @@ export const api = {
   },
 
   async adminGetShoutouts(): Promise<DbShoutout[]> {
-    const res = await fetch('/api/admin/shoutouts');
+    const res = await fetch('/api/admin/shoutouts', { cache: 'no-store' });
     if (!res.ok) throw new Error('Failed to fetch admin shoutouts');
     return res.json();
   },
@@ -330,7 +330,7 @@ export const api = {
 
   async getStationConfig(): Promise<any> {
     try {
-      const res = await fetch('/api/station-config');
+      const res = await fetch('/api/station-config', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data && data.name) return data;
@@ -368,7 +368,7 @@ export const api = {
 
   async getStationLogo(): Promise<string | null> {
     try {
-      const res = await fetch('/api/station-logo');
+      const res = await fetch('/api/station-logo', { cache: 'no-store' });
       if (!res.ok) return null;
       const data = await res.json();
       return data.logo || null;
@@ -392,7 +392,7 @@ export const api = {
 
   async getStationLogos(): Promise<any> {
     try {
-      const res = await fetch('/api/station-logos');
+      const res = await fetch('/api/station-logos', { cache: 'no-store' });
       if (!res.ok) return {};
       return await res.json();
     } catch {
@@ -415,10 +415,10 @@ export const api = {
 
   async getPromoBanners(): Promise<any[]> {
     try {
-      const res = await fetch('/api/promo-banners');
+      const res = await fetch('/api/promo-banners', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) return data;
+        if (Array.isArray(data)) return data;
       }
     } catch {}
     return INITIAL_PROMO_BANNERS;
@@ -439,7 +439,7 @@ export const api = {
 
   async getLiveTakeover(): Promise<any> {
     try {
-      const res = await fetch('/api/live-takeover');
+      const res = await fetch('/api/live-takeover', { cache: 'no-store' });
       if (!res.ok) return null;
       return res.json();
     } catch {
@@ -462,7 +462,7 @@ export const api = {
 
   async getInstitutionalData(): Promise<any | null> {
     try {
-      const res = await fetch('/api/institutional');
+      const res = await fetch('/api/institutional', { cache: 'no-store' });
       if (!res.ok) return null;
       return res.json();
     } catch {
@@ -497,7 +497,7 @@ export const api = {
   // Host Accounts (Locutores & Apresentadores)
   async getHostAccounts(): Promise<any[]> {
     try {
-      const res = await fetch('/api/host-accounts');
+      const res = await fetch('/api/host-accounts', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) return data;
@@ -625,7 +625,7 @@ export const api = {
   // Troca Direta de Horários (Pontual 1 dia ou Permanente)
   async getScheduleSwaps(): Promise<ScheduleSwapRecord[]> {
     try {
-      const res = await fetch('/api/schedule-swaps');
+      const res = await fetch('/api/schedule-swaps', { cache: 'no-store' });
       if (!res.ok) return [];
       const data = await res.json();
       return Array.isArray(data?.swaps) ? data.swaps : [];
@@ -707,7 +707,7 @@ export const api = {
   },
   async getPageSeoList(): Promise<PageSeoData[]> {
     try {
-      const res = await fetch('/api/seo');
+      const res = await fetch('/api/seo', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data)) return data;
@@ -720,7 +720,7 @@ export const api = {
 
   async getPageSeo(path: string): Promise<PageSeoData | null> {
     try {
-      const res = await fetch(`/api/seo/entry?path=${encodeURIComponent(path)}`);
+      const res = await fetch(`/api/seo/entry?path=${encodeURIComponent(path)}`, { cache: 'no-store' });
       if (res.ok) {
         return await res.json();
       }

@@ -119,8 +119,17 @@ async function startServer() {
   app.use(express.json({ limit: '15mb' }));
   app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
+  // Prevent browser/CDN/proxy caching on all API endpoints so multi-city users always see live state
+  app.use('/api', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    next();
+  });
+
   const isDbConfigured = isDatabaseConfigured();
   let dbBootState: 'ok' | 'memoria' | 'erro' = isDbConfigured ? 'ok' : 'memoria';
+  const memorySettingsStore = new Map<string, string>();
 
   // --- ADMIN AUTH STATE & MIDDLEWARE (Norma 8.4) ---
   const ADMIN_USER = process.env.ADMIN_USER || 'admin@rebeldiafm.com';
@@ -545,19 +554,21 @@ async function startServer() {
   app.get(['/api/station-config', '/api/settings'], async (req, res) => {
     if (!isDbConfigured) {
       return res.json({
-        name: 'Rebeldia FM',
-        slogan: 'radio LIVRE',
-        streamUrl: 'https://sv11.hdradios.net:6806/;',
-        whatsappNumber: '5548991984678',
-        instagramUrl: 'https://instagram.com/rebeldiafm',
-        email: 'radio@rebeldiafm.com.br',
-        location: 'Florianópolis / SC, Brasil',
-        frequency: 'Web HD & App',
-        logoUrl: '/reb_mascot.jpg',
-        customLogo: '/reb_mascot.jpg',
-        paletteId: 'amber-rock',
-        metadataDelaySeconds: 10,
-        waveStyle: 'multicolor',
+        name: memorySettingsStore.get('name') || 'Rebeldia FM',
+        slogan: memorySettingsStore.get('slogan') || 'radio LIVRE',
+        streamUrl: normalizeStreamUrlServer(memorySettingsStore.get('streamUrl') || 'https://sv11.hdradios.net:6806/;'),
+        whatsappNumber: memorySettingsStore.get('whatsappNumber') || '5548991984678',
+        instagramHandle: memorySettingsStore.get('instagramHandle') || memorySettingsStore.get('instagramUrl') || '@rebeldiafm',
+        instagramUrl: memorySettingsStore.get('instagramUrl') || 'https://instagram.com/rebeldiafm',
+        facebookUrl: memorySettingsStore.get('facebookUrl') || 'https://facebook.com/rebeldiafm',
+        email: memorySettingsStore.get('email') || 'radio@rebeldiafm.com.br',
+        location: memorySettingsStore.get('location') || 'Florianópolis / SC, Brasil',
+        frequency: memorySettingsStore.get('frequency') || 'Web HD & App',
+        logoUrl: memorySettingsStore.get('customLogo') || '/reb_mascot.jpg',
+        customLogo: memorySettingsStore.get('customLogo') || '/reb_mascot.jpg',
+        paletteId: memorySettingsStore.get('paletteId') || 'amber-rock',
+        metadataDelaySeconds: memorySettingsStore.get('metadataDelaySeconds') ? Number(memorySettingsStore.get('metadataDelaySeconds')) : 10,
+        waveStyle: memorySettingsStore.get('waveStyle') || 'multicolor',
       });
     }
     try {
@@ -571,7 +582,9 @@ async function startServer() {
         slogan: configMap.slogan || 'radio LIVRE',
         streamUrl: normalizeStreamUrlServer(configMap.streamUrl),
         whatsappNumber: configMap.whatsappNumber || '5548991984678',
+        instagramHandle: configMap.instagramHandle || configMap.instagramUrl || '@rebeldiafm',
         instagramUrl: configMap.instagramUrl || 'https://instagram.com/rebeldiafm',
+        facebookUrl: configMap.facebookUrl || 'https://facebook.com/rebeldiafm',
         email: configMap.email || 'radio@rebeldiafm.com.br',
         location:
           configMap.location && !configMap.location.toLowerCase().includes('canoas')
@@ -592,13 +605,18 @@ async function startServer() {
 
   app.post(['/api/station-config', '/api/settings'], async (req, res) => {
     try {
-      const updates = req.body;
+      const updates = { ...(req.body || {}) };
+      if (updates.instagramHandle !== undefined && updates.instagramUrl === undefined) {
+        updates.instagramUrl = updates.instagramHandle;
+      }
       const validKeys = [
         'name',
         'slogan',
         'streamUrl',
         'whatsappNumber',
+        'instagramHandle',
         'instagramUrl',
+        'facebookUrl',
         'email',
         'location',
         'frequency',
@@ -607,6 +625,15 @@ async function startServer() {
         'metadataDelaySeconds',
         'waveStyle',
       ];
+
+      if (!isDbConfigured) {
+        for (const key of validKeys) {
+          if (updates[key] !== undefined) {
+            memorySettingsStore.set(key, updates[key] === null ? '' : String(updates[key]));
+          }
+        }
+        return res.json({ success: true });
+      }
 
       for (const key of validKeys) {
         if (updates[key] !== undefined) {
@@ -636,6 +663,9 @@ async function startServer() {
   });
 
   app.get('/api/station-logo', async (req, res) => {
+    if (!isDbConfigured) {
+      return res.json({ logo: memorySettingsStore.get('customLogo') || '/reb_mascot.jpg' });
+    }
     try {
       const [row] = await db
         .select()
@@ -653,6 +683,11 @@ async function startServer() {
     try {
       const { logo } = req.body;
       const logoValue = logo ? String(logo).trim() : '';
+
+      if (!isDbConfigured) {
+        memorySettingsStore.set('customLogo', logoValue);
+        return res.json({ success: true, logo: logoValue || null });
+      }
 
       await db
         .insert(stationSettings)
@@ -678,6 +713,14 @@ async function startServer() {
 
   // Multi-Slot Station Logos API (Header, Complement Text, Player Center, Footer, Windows Taskbar, Favicon)
   app.get('/api/station-logos', async (req, res) => {
+    if (!isDbConfigured) {
+      const raw = memorySettingsStore.get('stationLogosConfig');
+      try {
+        return res.json(raw ? JSON.parse(raw) : {});
+      } catch {
+        return res.json({});
+      }
+    }
     try {
       const [row] = await db
         .select()
@@ -717,6 +760,13 @@ async function startServer() {
     try {
       const logosConfig = req.body || {};
       const serialized = JSON.stringify(logosConfig);
+
+      if (!isDbConfigured) {
+        memorySettingsStore.set('stationLogosConfig', serialized);
+        const primaryLogo = logosConfig.headerLogo || logosConfig.playerCenterLogo || '';
+        if (primaryLogo) memorySettingsStore.set('customLogo', String(primaryLogo));
+        return res.json({ success: true, logos: logosConfig });
+      }
 
       await db
         .insert(stationSettings)
@@ -761,20 +811,31 @@ async function startServer() {
 
   // Promo Banners API
   app.get('/api/promo-banners', async (req, res) => {
+    if (!isDbConfigured) {
+      const raw = memorySettingsStore.get('promoBannersJson');
+      if (!raw) return res.json(null);
+      try {
+        return res.json(JSON.parse(raw));
+      } catch {
+        return res.json([]);
+      }
+    }
     try {
       const [row] = await db
         .select()
         .from(stationSettings)
         .where(eq(stationSettings.key, 'promoBannersJson'))
         .limit(1);
-      
+
+      if (!row?.value) {
+        return res.json(null);
+      }
+
       let banners = [];
-      if (row?.value) {
-        try {
-          banners = JSON.parse(row.value);
-        } catch {
-          banners = [];
-        }
+      try {
+        banners = JSON.parse(row.value);
+      } catch {
+        banners = [];
       }
       res.json(banners);
     } catch (error) {
@@ -787,6 +848,11 @@ async function startServer() {
     try {
       const { banners } = req.body;
       const bannersJson = JSON.stringify(Array.isArray(banners) ? banners : []);
+
+      if (!isDbConfigured) {
+        memorySettingsStore.set('promoBannersJson', bannersJson);
+        return res.json({ success: true, count: Array.isArray(banners) ? banners.length : 0 });
+      }
 
       await db
         .insert(stationSettings)
@@ -812,6 +878,14 @@ async function startServer() {
 
   // Institutional Data API
   app.get('/api/institutional', async (req, res) => {
+    if (!isDbConfigured) {
+      const raw = memorySettingsStore.get('institutionalDataJson');
+      try {
+        return res.json(raw ? JSON.parse(raw) : null);
+      } catch {
+        return res.json(null);
+      }
+    }
     try {
       const [row] = await db
         .select()
@@ -833,6 +907,11 @@ async function startServer() {
     try {
       const data = req.body;
       const dataJson = JSON.stringify(data || {});
+
+      if (!isDbConfigured) {
+        memorySettingsStore.set('institutionalDataJson', dataJson);
+        return res.json({ success: true });
+      }
 
       await db
         .insert(stationSettings)
@@ -858,6 +937,14 @@ async function startServer() {
 
   // Live Studio / Substitute Host Takeover API
   app.get('/api/live-takeover', async (req, res) => {
+    if (!isDbConfigured) {
+      const raw = memorySettingsStore.get('liveTakeoverJson');
+      try {
+        return res.json(raw ? JSON.parse(raw) : { isActive: false });
+      } catch {
+        return res.json({ isActive: false });
+      }
+    }
     try {
       const [row] = await db
         .select()
@@ -886,6 +973,11 @@ async function startServer() {
       const takeoverData = req.body;
       const takeoverJson = JSON.stringify(takeoverData || { isActive: false });
 
+      if (!isDbConfigured) {
+        memorySettingsStore.set('liveTakeoverJson', takeoverJson);
+        return res.json({ success: true, takeover: takeoverData });
+      }
+
       await db
         .insert(stationSettings)
         .values({
@@ -911,6 +1003,11 @@ async function startServer() {
   app.delete('/api/live-takeover', async (req, res) => {
     try {
       const emptyTakeover = JSON.stringify({ isActive: false });
+
+      if (!isDbConfigured) {
+        memorySettingsStore.set('liveTakeoverJson', emptyTakeover);
+        return res.json({ success: true, message: 'Takeover reset to normal schedule' });
+      }
 
       await db
         .insert(stationSettings)

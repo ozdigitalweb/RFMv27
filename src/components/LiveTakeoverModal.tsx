@@ -37,8 +37,8 @@ interface LiveTakeoverModalProps {
   currentLoggedInHost?: HostAccount | null;
   initialCoringaMode?: boolean;
   liveTakeover: LiveTakeover | null;
-  onStartTakeover: (takeover: LiveTakeover) => void;
-  onStopTakeover: () => void;
+  onStartTakeover: (takeover: LiveTakeover) => Promise<void> | void;
+  onStopTakeover: () => Promise<void> | void;
   stationConfig: RadioStationConfig;
 }
 
@@ -189,6 +189,7 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
   const [takeoverNotes, setTakeoverNotes] = useState('');
   const [isCustomMode, setIsCustomMode] = useState(false);
   const [formError, setFormError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Sincroniza estado ao abrir o modal (priorizando o perfil do locutor logado no Modo Coringa)
   useEffect(() => {
@@ -268,7 +269,7 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
     ? customWhatsapp.trim() || stationConfig.whatsappNumber || '5548991984678'
     : selectedHostData?.whatsappNumber || stationConfig.whatsappNumber || '5548991984678';
 
-  const handleLaunchTakeover = (e: React.FormEvent) => {
+  const handleLaunchTakeover = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
 
@@ -324,8 +325,15 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
         startedAt: Date.now(),
       };
 
-      onStartTakeover(newTakeover);
-      onClose();
+      setIsSubmitting(true);
+      try {
+        await onStartTakeover(newTakeover);
+        onClose();
+      } catch (err: unknown) {
+        setFormError(err instanceof Error ? err.message : 'Erro ao salvar entrada ao vivo no servidor.');
+      } finally {
+        setIsSubmitting(false);
+      }
       return;
     }
 
@@ -344,8 +352,15 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
       startedAt: Date.now(),
     };
 
-    onStartTakeover(newTakeover);
-    onClose();
+    setIsSubmitting(true);
+    try {
+      await onStartTakeover(newTakeover);
+      onClose();
+    } catch (err: unknown) {
+      setFormError(err instanceof Error ? err.message : 'Erro ao salvar entrada ao vivo no servidor.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -513,14 +528,24 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
               )}
 
               <button
-                onClick={() => {
-                  onStopTakeover();
-                  onClose();
+                type="button"
+                disabled={isSubmitting}
+                onClick={async () => {
+                  setFormError('');
+                  setIsSubmitting(true);
+                  try {
+                    await onStopTakeover();
+                    onClose();
+                  } catch (err: unknown) {
+                    setFormError(err instanceof Error ? err.message : 'Erro ao encerrar plantão no servidor.');
+                  } finally {
+                    setIsSubmitting(false);
+                  }
                 }}
-                className="w-full py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-black transition flex items-center justify-center gap-2 shadow-lg cursor-pointer"
+                className="w-full py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-black transition flex items-center justify-center gap-2 shadow-lg cursor-pointer disabled:opacity-50"
               >
                 <PowerOff className="w-4 h-4" />
-                <span>Encerrar Plantão e Devolver ao Titular ({currentScheduledProgram?.host || 'REB'})</span>
+                <span>{isSubmitting ? 'Salvando...' : `Encerrar Plantão e Devolver ao Titular (${currentScheduledProgram?.host || 'REB'})`}</span>
               </button>
             </div>
           )}

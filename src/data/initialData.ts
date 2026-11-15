@@ -1166,20 +1166,6 @@ export const FEATURE_SUGGESTIONS = [
     status: 'Integrado',
   },
   {
-    id: 'f-6',
-    icon: 'Clock',
-    title: 'Sleep Timer (Temporizador Inteligente)',
-    desc: 'Desliga a rádio automaticamente após 15, 30, 45, 60 ou 90 minutos para o ouvinte dormir ouvindo a rádio sem gastar bateria.',
-    status: 'Integrado',
-  },
-  {
-    id: 'f-8',
-    icon: 'Bell',
-    title: 'Despertador Musical da Rádio',
-    desc: 'Configure o horário para o app iniciar o streaming automaticamente e acordar com a sua estação favorita.',
-    status: 'Integrado',
-  },
-  {
     id: 'f-9',
     icon: 'Share2',
     title: 'Media Session API (Controles na Tela Bloqueada)',

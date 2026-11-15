@@ -60,7 +60,7 @@ export const RebeldiaLogo: React.FC<RebeldiaLogoProps> = ({
         <img
           src={logoSrc}
           alt="Logotipo da Emissora"
-          className={`${currentHeight} w-auto max-w-full object-contain drop-shadow-md rounded-full`}
+          className={`${currentHeight} w-auto max-w-full object-contain drop-shadow-md rounded-md`}
         />
       </div>
     );

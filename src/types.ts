@@ -169,13 +169,6 @@ export interface ShoutoutMessage {
   avatarColor: string;
 }
 
-export interface RadioAlarm {
-  enabled: boolean;
-  time: string; // "07:00"
-  days: number[]; // [1, 2, 3, 4, 5]
-  label: string;
-}
-
 export interface RadioStationConfig {
   name: string;
   slogan: string;

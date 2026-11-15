@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sliders, Radio, Check, RefreshCw, X, Volume2, Palette, Sparkles, RotateCcw, Trash2, Sun, Moon, Clock } from 'lucide-react';
+import { Sliders, Radio, Check, RefreshCw, X, Volume2, Palette, Sparkles, RotateCcw, Trash2, Sun, Moon } from 'lucide-react';
 import { RadioStationConfig, EqualizerPreset } from '../types';
 import { COLOR_PALETTES, getPaletteById, togglePaletteMode } from '../utils/theme';
 
@@ -36,9 +36,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSelectPalette,
 }) => {
   const [streamUrl, setStreamUrl] = useState(config.streamUrl);
-  const [metadataDelaySeconds, setMetadataDelaySeconds] = useState<number>(
-    config.metadataDelaySeconds !== undefined ? config.metadataDelaySeconds : 10
-  );
   const [isClearingCache, setIsClearingCache] = useState(false);
   const [cacheClearedSuccess, setCacheClearedSuccess] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -47,7 +44,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     onSaveConfig({
       ...config,
       streamUrl,
-      metadataDelaySeconds,
     });
     setSaveSuccess(true);
     setTimeout(() => {
@@ -63,8 +59,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   useEffect(() => {
     setStreamUrl(config.streamUrl);
-    setMetadataDelaySeconds(config.metadataDelaySeconds !== undefined ? config.metadataDelaySeconds : 10);
-  }, [config.streamUrl, config.metadataDelaySeconds]);
+  }, [config.streamUrl]);
 
   // Keep filter aligned if current palette mode changes externally
   useEffect(() => {
@@ -135,42 +130,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         className="bg-zinc-950 border border-white/15 rounded-2xl w-full max-w-2xl p-6 sm:p-7 shadow-2xl relative overflow-hidden text-zinc-200 max-h-[calc(100vh-20px)] sm:max-h-[calc(100vh-60px)] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="absolute top-4 right-4 z-40 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleSave}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md cursor-pointer active:scale-95 ${
-              saveSuccess
-                ? 'bg-emerald-500 text-black shadow-emerald-500/20'
-                : 'bg-white hover:bg-zinc-200 text-black'
-            }`}
-            title="Salvar configurações"
-          >
-            <Check className="w-3.5 h-3.5" />
-            <span>{saveSuccess ? 'Salvo!' : 'Salvar'}</span>
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onClose();
-            }}
-            className="p-2 text-zinc-300 hover:text-white rounded-full bg-zinc-900/90 hover:bg-zinc-800 border border-white/20 transition cursor-pointer shadow-lg active:scale-95"
-            aria-label="Fechar"
-            title="Fechar"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="flex items-center gap-3 mb-6 relative z-10 pr-28 sm:pr-32">
-          <div className="w-11 h-11 rounded-2xl bg-white/10 text-white border border-white/10 flex items-center justify-center shrink-0">
-            <Sliders className="w-5 h-5" />
+        <div className="flex items-start justify-between gap-3 mb-6 relative z-10">
+          <div className="flex items-center gap-3 min-w-0 pt-1">
+            <div className="w-11 h-11 rounded-2xl bg-white/10 text-white border border-white/10 flex items-center justify-center shrink-0">
+              <Sliders className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-[18px] font-bold text-white font-display leading-tight">Configurações & Áudio HD</h2>
+              <p className="text-xs text-zinc-400 mt-0.5">Equalizador de áudio e conexões do servidor</p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-[18px] font-bold text-white font-display">Configurações & Áudio HD</h2>
-            <p className="text-xs text-zinc-400">Equalizador de áudio e conexões do servidor</p>
+
+          <div className="flex flex-col items-end gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onClose();
+              }}
+              className="p-2 text-zinc-300 hover:text-white rounded-full bg-zinc-900/90 hover:bg-zinc-800 border border-white/20 transition cursor-pointer shadow-lg active:scale-95"
+              aria-label="Fechar"
+              title="Fechar"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md cursor-pointer active:scale-95 ${
+                saveSuccess
+                  ? 'bg-emerald-500 text-black shadow-emerald-500/20'
+                  : 'bg-white hover:bg-zinc-200 text-black'
+              }`}
+              title="Salvar configurações"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>{saveSuccess ? 'Salvo!' : 'Salvar'}</span>
+            </button>
           </div>
         </div>
 
@@ -208,62 +205,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </button>
               );
             })}
-          </div>
-        </div>
-
-        {/* Section: Sincronia de Música & Retardo do Título (Compensação de Buffer) */}
-        <div className="mb-6 p-4 rounded-2xl bg-zinc-900/60 border border-white/10 space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-1.5">
-              <Clock className="w-4 h-4 text-amber-400" />
-              Sincronia da Faixa & Retardo do Título
-            </h3>
-            <span className="px-2.5 py-1 rounded-full bg-amber-400/10 border border-amber-400/30 text-amber-400 text-xs font-mono font-bold">
-              {metadataDelaySeconds === 0 ? '0s (Sem retardo)' : `${metadataDelaySeconds}s de retardo`}
-            </span>
-          </div>
-
-          <p className="text-[11px] text-zinc-400 leading-relaxed">
-            Compensa o buffer de transmissão do streaming na web. Como a transmissão pela internet leva cerca de 10 segundos para chegar ao reprodutor, o retardo garante que o nome da música e a capa entrem em sincronia exata no momento em que o áudio começa a tocar nos alto-falantes.
-          </p>
-
-          <div className="space-y-2.5 pt-1">
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] text-zinc-500 font-mono">0s</span>
-              <input
-                type="range"
-                min={0}
-                max={30}
-                step={1}
-                value={metadataDelaySeconds}
-                onChange={(e) => setMetadataDelaySeconds(Number(e.target.value))}
-                className="flex-1 accent-amber-400 h-1.5 bg-zinc-800 rounded-lg cursor-pointer"
-              />
-              <span className="text-[10px] text-zinc-500 font-mono">30s</span>
-            </div>
-
-            {/* Presets Rápidos */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-              {[
-                { sec: 0, label: '0s (Direto)' },
-                { sec: 5, label: '5s' },
-                { sec: 10, label: '10s (Recomendado)' },
-                { sec: 15, label: '15s' },
-              ].map((p) => (
-                <button
-                  key={p.sec}
-                  type="button"
-                  onClick={() => setMetadataDelaySeconds(p.sec)}
-                  className={`py-1.5 px-2 rounded-xl text-xs font-bold transition border cursor-pointer ${
-                    metadataDelaySeconds === p.sec
-                      ? 'bg-amber-400 text-black border-amber-400 shadow-sm'
-                      : 'bg-zinc-800/80 hover:bg-zinc-800 border-white/10 text-zinc-300'
-                  }`}
-                >
-                  <div className="truncate">{p.label}</div>
-                </button>
-              ))}
-            </div>
           </div>
         </div>
 
@@ -476,7 +417,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Action Controls */}
-        <div className="pt-4 border-t border-white/10 flex items-center justify-between">
+        <div className="pt-4 border-t border-white/10 flex items-center justify-between gap-3 sm:gap-4">
           <button
             type="button"
             onClick={onReloadStream}

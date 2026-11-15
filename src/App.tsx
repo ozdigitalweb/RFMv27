@@ -22,8 +22,8 @@ import {
   ChevronRight,
   Headphones,
   Signal,
-  Sliders,
-  Maximize2,
+  Instagram,
+  Facebook,
 } from 'lucide-react';
 import { radioAudio, normalizeStreamUrl, DEMO_TRACKS, DemoTrack } from './utils/audioEngine';
 
@@ -35,9 +35,6 @@ interface BeforeInstallPromptEvent extends Event {
 import {
   DEFAULT_RADIO_CONFIG,
   INITIAL_PROGRAMS,
-  INITIAL_REQUESTS,
-  INITIAL_MESSAGES,
-  INITIAL_PROMO_BANNERS,
   DEFAULT_REB_PROGRAM,
   INITIAL_HOST_ACCOUNTS,
 } from './data/initialData';
@@ -45,7 +42,6 @@ import {
   ActiveTab,
   EqualizerPreset,
   ProgramItem,
-  RadioAlarm,
   RadioStationConfig,
   ShoutoutMessage,
   SongRequest,
@@ -59,16 +55,15 @@ import { InstallModal } from './components/InstallModal';
 import { SongRequestsModal } from './components/SongRequestsModal';
 import { ScheduleView } from './components/ScheduleView';
 import { MuralBoard } from './components/MuralBoard';
-import { SleepTimerModal } from './components/SleepTimerModal';
 import { SettingsModal } from './components/SettingsModal';
 import { FeaturesSuggestionModal } from './components/FeaturesSuggestionModal';
-import { AlarmClockModal } from './components/AlarmClockModal';
 import { AdminManagerModal } from './components/AdminManagerModal';
 import { InstitutionalView } from './components/InstitutionalView';
 import { TodayScheduleSection } from './components/TodayScheduleSection';
 import { ProgramHotsiteModal } from './components/ProgramHotsiteModal';
 import { HostAuthModal } from './components/HostAuthModal';
 import { PromoModal } from './components/PromoModal';
+import { MarqueeText } from './components/MarqueeText';
 import { PromoBannerCard } from './components/PromoBannerCard';
 import { LiveProgramHeroCard } from './components/LiveProgramHeroCard';
 import { RebeldiaLogo } from './components/RebeldiaLogo';
@@ -81,14 +76,13 @@ import { MusicModeModal } from './components/MusicModeModal';
 import { useAuth } from './context/AuthContext';
 import { api, DbStats, StreamMetadata } from './utils/api';
 import {
-  saveCustomLogo,
   getStationLogos,
   fetchAndSyncServerLogos,
   applyDynamicFavicon,
   applyDynamicWindowsTile,
 } from './utils/logo';
 import { applyTheme, getSavedPaletteId } from './utils/theme';
-import { getSavedInstitutionalData, saveInstitutionalData, InstitutionalData } from './data/institutional';
+import { DEFAULT_INSTITUTIONAL_DATA, InstitutionalData } from './data/institutional';
 import { applyClientSeo } from './utils/seo';
 import { findProgramBySlug, getProgramLogoSrc, getProgramSlug } from './utils/slug';
 import {
@@ -142,7 +136,7 @@ export default function App() {
     }
   }, []);
   const [selectedHotsiteProgram, setSelectedHotsiteProgram] = useState<ProgramItem | null>(null);
-  const [institutionalData, setInstitutionalData] = useState<InstitutionalData>(getSavedInstitutionalData);
+  const [institutionalData, setInstitutionalData] = useState<InstitutionalData>(DEFAULT_INSTITUTIONAL_DATA);
 
   // Host Account State & Modal
   const [isHostAuthOpen, setIsHostAuthOpen] = useState(false);
@@ -191,36 +185,8 @@ export default function App() {
     applyTheme(currentPaletteId);
   }, [currentPaletteId]);
 
-  // Radio Config State
-  const [stationConfig, setStationConfig] = useState<RadioStationConfig>(() => {
-    try {
-      const saved = localStorage.getItem('rebeldia_station_config');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (!parsed.slogan || parsed.slogan.includes('24 horas no ar') || parsed.slogan.includes('mediocridade')) {
-          parsed.slogan = 'radio LIVRE';
-        }
-        if (!parsed.streamUrl || !parsed.streamUrl.includes('hdradios.net:6806')) {
-          parsed.streamUrl = 'https://sv11.hdradios.net:6806/;';
-        } else if (!parsed.streamUrl.endsWith('/;') && !parsed.streamUrl.includes('/stream') && !parsed.streamUrl.includes('/live')) {
-          parsed.streamUrl = parsed.streamUrl.replace(/\/?$/, '/;');
-        }
-        if (parsed.metadataDelaySeconds === undefined) {
-          parsed.metadataDelaySeconds = 10;
-        }
-        if (!parsed.location || parsed.location.toLowerCase().includes('canoas')) {
-          parsed.location = 'Florianópolis / SC, Brasil';
-          try {
-            localStorage.setItem('rebeldia_station_config', JSON.stringify(parsed));
-          } catch {}
-        }
-        return parsed;
-      }
-      return DEFAULT_RADIO_CONFIG;
-    } catch {
-      return DEFAULT_RADIO_CONFIG;
-    }
-  });
+  // Radio Config State (Server-authoritative — never cached in localStorage across devices)
+  const [stationConfig, setStationConfig] = useState<RadioStationConfig>(DEFAULT_RADIO_CONFIG);
 
   // Host Accounts (Cadastro de Locutores) State & Programas com WhatsApp resolvido pelo Locutor
   const [hostAccounts, setHostAccounts] = useState<HostAccount[]>(() =>
@@ -241,24 +207,23 @@ export default function App() {
     });
   }, [schedulePrograms, scheduleSwaps, hostAccounts, stationConfig.whatsappNumber]);
 
-  // Client-side cache migration to permanently purge any stale "Canoas" references
+  // Purge legacy shared localStorage keys so stale local caches never override server data
   useEffect(() => {
     try {
-      const keysToClean = [
-        'rebeldia_station_config',
+      const sharedKeysToPurge = [
+        'rebeldia_live_takeover',
+        'rebeldia_schedule',
+        'rebeldia_promo_banners',
         'rebeldia_institutional_data_v2',
         'rebeldia_institutional_data',
+        'rebeldia_station_config',
         'rebeldia_station_logos',
+        'rebeldia_custom_logo',
+        'rebeldia_requests',
+        'rebeldia_messages',
       ];
-      for (const k of keysToClean) {
-        const val = localStorage.getItem(k);
-        if (val && val.toLowerCase().includes('canoas')) {
-          const cleaned = val
-            .replace(/Canoas(\s*-\s*RS|\s*\/RS|\s*\/ RS)/gi, 'Florianópolis / SC')
-            .replace(/Canoas,?\s*(Rio Grande do Sul|RS)/gi, 'Florianópolis, Santa Catarina')
-            .replace(/Canoas/gi, 'Florianópolis');
-          localStorage.setItem(k, cleaned);
-        }
+      for (const k of sharedKeysToPurge) {
+        localStorage.removeItem(k);
       }
     } catch {}
   }, []);
@@ -445,9 +410,7 @@ export default function App() {
 
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
   const [installPlatform, setInstallPlatform] = useState<'android' | 'ios'>('android');
-  const [isSleepTimerOpen, setIsSleepTimerOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isAlarmOpen, setIsAlarmOpen] = useState(false);
   const [isMusicModeOpen, setIsMusicModeOpen] = useState(false);
 
   const openInstallModal = (platform?: 'android' | 'ios') => {
@@ -463,76 +426,104 @@ export default function App() {
     setIsInstallModalOpen(true);
   };
 
-  // Sleep Timer & Alarm
-  const [timerSecondsRemaining, setTimerSecondsRemaining] = useState<number | null>(null);
-  const [alarm, setAlarm] = useState<RadioAlarm>(() => {
-    try {
-      const saved = localStorage.getItem('rebeldia_alarm');
-      return saved ? JSON.parse(saved) : { enabled: false, time: '07:00', days: [0, 1, 2, 3, 4, 5, 6], label: 'Despertar Musical' };
-    } catch {
-      return { enabled: false, time: '07:00', days: [0, 1, 2, 3, 4, 5, 6], label: 'Despertar Musical' };
-    }
-  });
+  // Community Data State (Server-authoritative)
+  const [requests, setRequests] = useState<SongRequest[]>([]);
+  const [messages, setMessages] = useState<ShoutoutMessage[]>([]);
 
-  // Community Data State
-  const [requests, setRequests] = useState<SongRequest[]>(() => {
-    try {
-      const saved = localStorage.getItem('rebeldia_requests');
-      return saved ? JSON.parse(saved) : INITIAL_REQUESTS;
-    } catch {
-      return INITIAL_REQUESTS;
-    }
-  });
-
-  const [messages, setMessages] = useState<ShoutoutMessage[]>(() => {
-    try {
-      const saved = localStorage.getItem('rebeldia_messages');
-      return saved ? JSON.parse(saved) : INITIAL_MESSAGES;
-    } catch {
-      return INITIAL_MESSAGES;
-    }
-  });
-
-  // Promo Banners State & Modal
-  const [promoBanners, setPromoBanners] = useState<PromoBanner[]>(() => {
-    try {
-      const saved = localStorage.getItem('rebeldia_promo_banners');
-      return saved ? JSON.parse(saved) : INITIAL_PROMO_BANNERS;
-    } catch {
-      return INITIAL_PROMO_BANNERS;
-    }
-  });
+  // Promo Banners State & Modal (Server-authoritative)
+  const [promoBanners, setPromoBanners] = useState<PromoBanner[]>([]);
   const [isPromoModalOpen, setIsPromoModalOpen] = useState(false);
 
-  const handleSavePromoBanners = (updated: PromoBanner[]) => {
+  const handleSavePromoBanners = async (updated: PromoBanner[]) => {
     setPromoBanners(updated);
-    localStorage.setItem('rebeldia_promo_banners', JSON.stringify(updated));
-    api.savePromoBanners(updated).catch(() => {});
+    await api.savePromoBanners(updated);
   };
 
-  // Live Takeover State (Locutor Online / Substituição de Horário de Colega)
-  const [liveTakeover, setLiveTakeover] = useState<LiveTakeover | null>(() => {
-    try {
-      const saved = localStorage.getItem('rebeldia_live_takeover');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
+  // Live Takeover State (Locutor Online / Coringa / Substituição — Server-authoritative)
+  const [liveTakeover, setLiveTakeover] = useState<LiveTakeover | null>(null);
   const [isTakeoverModalOpen, setIsTakeoverModalOpen] = useState(false);
   const [takeoverTargetProgram, setTakeoverTargetProgram] = useState<ProgramItem | null>(null);
   const [takeoverInitialCoringa, setTakeoverInitialCoringa] = useState(false);
 
-  const handleStartTakeover = (takeover: LiveTakeover) => {
+  // Fast live state sync (Coringa, Trocas de Horário, Pedidos e Recados) for real-time cross-device visibility
+  const syncLiveState = useCallback(async () => {
+    try {
+      const [backendTakeover, backendSwaps, backendRequests, backendMessages, backendStats] =
+        await Promise.allSettled([
+          api.getLiveTakeover(),
+          api.getScheduleSwaps(),
+          api.getSongRequests(),
+          api.getShoutouts(),
+          api.getStats(),
+        ]);
+
+      if (backendTakeover.status === 'fulfilled' && backendTakeover.value !== null) {
+        if (backendTakeover.value.isActive) {
+          setLiveTakeover(backendTakeover.value);
+        } else {
+          setLiveTakeover(null);
+        }
+      }
+
+      if (backendSwaps.status === 'fulfilled' && Array.isArray(backendSwaps.value)) {
+        setScheduleSwaps(backendSwaps.value);
+      }
+
+      if (backendRequests.status === 'fulfilled' && Array.isArray(backendRequests.value)) {
+        const mappedRequests: SongRequest[] = backendRequests.value.map((r) => ({
+          id: String(r.id),
+          listenerName: r.listenerName,
+          city: r.listenerCity || 'Ouvinte Web',
+          songTitle: r.songTitle,
+          artist: r.artist,
+          dedication: r.message || r.dedicatedTo || undefined,
+          dedicatedTo: r.dedicatedTo || undefined,
+          artworkUrl: r.artworkUrl || undefined,
+          previewUrl: r.previewUrl || undefined,
+          artistBio: r.artistBio || undefined,
+          timestamp: new Date(r.createdAt).getTime(),
+          votes: r.votes || 1,
+        }));
+        setRequests(mappedRequests);
+      }
+
+      if (backendMessages.status === 'fulfilled' && Array.isArray(backendMessages.value)) {
+        const mappedMessages: ShoutoutMessage[] = backendMessages.value.map((m) => ({
+          id: String(m.id),
+          author: m.authorName,
+          city: m.authorCity || 'Ouvinte Web',
+          message: m.content,
+          timestamp: new Date(m.createdAt).getTime(),
+          likes: m.likesCount,
+          avatarColor: 'bg-zinc-800',
+        }));
+        setMessages(mappedMessages);
+      }
+
+      if (backendStats.status === 'fulfilled') {
+        setDbStats(backendStats.value);
+      }
+    } catch (err) {
+      console.error('Error syncing live state:', err);
+    }
+  }, []);
+
+  const handleStartTakeover = async (takeover: LiveTakeover) => {
+    const ok = await api.saveLiveTakeover(takeover);
+    if (!ok) {
+      throw new Error('Não foi possível gravar sua entrada ao vivo no servidor. Tente novamente.');
+    }
     setLiveTakeover(takeover);
-    localStorage.setItem('rebeldia_live_takeover', JSON.stringify(takeover));
-    api.saveLiveTakeover(takeover).catch(() => {});
+    syncLiveState().catch(() => {});
   };
 
-  const handleStopTakeover = () => {
+  const handleStopTakeover = async () => {
+    const ok = await api.clearLiveTakeover();
+    if (!ok) {
+      throw new Error('Não foi possível encerrar a transmissão no servidor. Tente novamente.');
+    }
     setLiveTakeover(null);
-    localStorage.removeItem('rebeldia_live_takeover');
-    api.clearLiveTakeover().catch(() => {});
+    syncLiveState().catch(() => {});
   };
 
   const handleOpenTakeoverForProgram = (prog?: ProgramItem, coringaMode = false) => {
@@ -610,26 +601,32 @@ export default function App() {
 
       if (backendInstitutional.status === 'fulfilled' && backendInstitutional.value) {
         setInstitutionalData((prev) => ({ ...prev, ...backendInstitutional.value }));
-        saveInstitutionalData(backendInstitutional.value);
       }
 
       if (backendHosts.status === 'fulfilled' && Array.isArray(backendHosts.value) && backendHosts.value.length > 0) {
-        setHostAccounts(ensureSystemHosts(backendHosts.value, INITIAL_HOST_ACCOUNTS));
+        const ensured = ensureSystemHosts(backendHosts.value, INITIAL_HOST_ACCOUNTS);
+        setHostAccounts(ensured);
+        setCurrentLoggedInHost((prevHost) => {
+          if (!prevHost) return prevHost;
+          const freshHost = ensured.find((h) => h.id === prevHost.id);
+          if (!freshHost) return prevHost;
+          try {
+            localStorage.setItem('rebeldia_logged_host', JSON.stringify(freshHost));
+          } catch {}
+          return freshHost;
+        });
       }
 
-      if (backendTakeover.status === 'fulfilled' && backendTakeover.value) {
+      if (backendTakeover.status === 'fulfilled' && backendTakeover.value !== null) {
         if (backendTakeover.value.isActive) {
           setLiveTakeover(backendTakeover.value);
-          localStorage.setItem('rebeldia_live_takeover', JSON.stringify(backendTakeover.value));
         } else {
           setLiveTakeover(null);
-          localStorage.removeItem('rebeldia_live_takeover');
         }
       }
 
-      if (backendBanners.status === 'fulfilled' && backendBanners.value && backendBanners.value.length > 0) {
+      if (backendBanners.status === 'fulfilled' && Array.isArray(backendBanners.value)) {
         setPromoBanners(backendBanners.value);
-        localStorage.setItem('rebeldia_promo_banners', JSON.stringify(backendBanners.value));
       }
 
       if (backendConfig.status === 'fulfilled' && backendConfig.value) {
@@ -644,32 +641,24 @@ export default function App() {
             ? sc.location
             : 'Florianópolis / SC, Brasil';
 
-        setStationConfig((prev) => {
-          const updated = {
-            ...prev,
-            name: sc.name || prev.name,
-            slogan: sc.slogan || prev.slogan,
-            streamUrl: validStreamUrl,
-            whatsappNumber: sc.whatsappNumber || prev.whatsappNumber,
-            instagramHandle: sc.instagramHandle || prev.instagramHandle,
-            email: sc.email || prev.email,
-            location: cleanLocation,
-            frequency: sc.frequency || prev.frequency,
-            logoUrl: sc.customLogo || sc.logoUrl || prev.logoUrl,
-            metadataDelaySeconds:
-              sc.metadataDelaySeconds !== undefined ? Number(sc.metadataDelaySeconds) : (prev.metadataDelaySeconds ?? 10),
-          };
-          try {
-            localStorage.setItem('rebeldia_station_config', JSON.stringify(updated));
-          } catch {}
-          return updated;
-        });
-        if (sc.customLogo) {
-          saveCustomLogo(sc.customLogo);
-        }
+        setStationConfig((prev) => ({
+          ...prev,
+          name: sc.name || prev.name,
+          slogan: sc.slogan || prev.slogan,
+          streamUrl: validStreamUrl,
+          whatsappNumber: sc.whatsappNumber || prev.whatsappNumber,
+          instagramHandle: sc.instagramHandle || sc.instagramUrl || prev.instagramHandle,
+          facebookUrl: sc.facebookUrl || prev.facebookUrl,
+          email: sc.email || prev.email,
+          location: cleanLocation,
+          frequency: sc.frequency || prev.frequency,
+          logoUrl: sc.customLogo || sc.logoUrl || prev.logoUrl,
+          metadataDelaySeconds:
+            sc.metadataDelaySeconds !== undefined ? Number(sc.metadataDelaySeconds) : (prev.metadataDelaySeconds ?? 10),
+        }));
       }
 
-      if (backendRequests.status === 'fulfilled' && backendRequests.value.length > 0) {
+      if (backendRequests.status === 'fulfilled' && Array.isArray(backendRequests.value)) {
         const mappedRequests: SongRequest[] = backendRequests.value.map((r) => ({
           id: String(r.id),
           listenerName: r.listenerName,
@@ -687,7 +676,7 @@ export default function App() {
         setRequests(mappedRequests);
       }
 
-      if (backendMessages.status === 'fulfilled' && backendMessages.value.length > 0) {
+      if (backendMessages.status === 'fulfilled' && Array.isArray(backendMessages.value)) {
         const mappedMessages: ShoutoutMessage[] = backendMessages.value.map((m) => ({
           id: String(m.id),
           author: m.authorName,
@@ -790,7 +779,52 @@ export default function App() {
 
   useEffect(() => {
     loadBackendData();
-  }, [loadBackendData]);
+
+    let lastFullSyncAt = Date.now();
+
+    // Sincronização rápida a cada 8s para Coringa, Trocas de Horário, Pedidos e Recados
+    const livePollInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        syncLiveState();
+      }
+    }, 8000);
+
+    // Sincronização completa a cada 30s (Grade, Locutores, Banners, Institucional, Config)
+    const fullPollInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        lastFullSyncAt = Date.now();
+        loadBackendData();
+        fetchAndSyncServerLogos().then((logos) => {
+          if (logos) setStationLogos(logos);
+        });
+      }
+    }, 30000);
+
+    // Atualiza imediatamente ao retornar à aba/janela
+    const handleVisibilityOrFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      if (now - lastFullSyncAt >= 3000) {
+        lastFullSyncAt = now;
+        loadBackendData();
+        fetchAndSyncServerLogos().then((logos) => {
+          if (logos) setStationLogos(logos);
+        });
+      } else {
+        syncLiveState();
+      }
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
+    return () => {
+      clearInterval(livePollInterval);
+      clearInterval(fullPollInterval);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    };
+  }, [loadBackendData, syncLiveState]);
 
   // Stream Metadata Auto-Polling with Buffer Sync Delay
   // Compensates for the ~10s audio streaming buffer latency so the song title & artwork
@@ -919,7 +953,6 @@ export default function App() {
 
   // Audio HTML element ref
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const sleepTimerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const pulseRingRef = useRef<HTMLDivElement | null>(null);
   const togglePlayRef = useRef<() => void>(() => {});
 
@@ -1048,61 +1081,6 @@ export default function App() {
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, [stationConfig.streamUrl]);
-
-  // Alarm Clock Checker Loop
-  useEffect(() => {
-    const checkAlarm = () => {
-      if (!alarm.enabled) return;
-      const now = new Date();
-      const currentHours = String(now.getHours()).padStart(2, '0');
-      const currentMinutes = String(now.getMinutes()).padStart(2, '0');
-      const currentTimeStr = `${currentHours}:${currentMinutes}`;
-      const currentDay = now.getDay();
-
-      if (currentTimeStr === alarm.time && alarm.days.includes(currentDay)) {
-        if (!isPlaying) {
-          togglePlayRef.current();
-        }
-      }
-    };
-
-    const interval = setInterval(checkAlarm, 1000 * 30);
-    return () => clearInterval(interval);
-  }, [alarm, isPlaying]);
-
-  // Sleep Timer countdown handler
-  const handleSetSleepTimer = (minutes: number | null) => {
-    if (sleepTimerIntervalRef.current) {
-      clearInterval(sleepTimerIntervalRef.current);
-      sleepTimerIntervalRef.current = null;
-    }
-
-    if (minutes === null) {
-      setTimerSecondsRemaining(null);
-      setIsSleepTimerOpen(false);
-      return;
-    }
-
-    const totalSeconds = minutes * 60;
-    setTimerSecondsRemaining(totalSeconds);
-    setIsSleepTimerOpen(false);
-
-    sleepTimerIntervalRef.current = setInterval(() => {
-      setTimerSecondsRemaining((prev) => {
-        if (prev === null || prev <= 1) {
-          if (sleepTimerIntervalRef.current) {
-            clearInterval(sleepTimerIntervalRef.current);
-            sleepTimerIntervalRef.current = null;
-          }
-          const audio = radioAudio.getAudioElement();
-          audio.pause();
-          setIsPlaying(false);
-          return null;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  };
 
   // Inicia a transmissão executando sempre um reload forçado do streaming ao vivo
   const startStreamWithReload = useCallback(() => {
@@ -1530,7 +1508,7 @@ export default function App() {
     return false;
   }, [currentLiveProgram, liveTakeover]);
 
-  // Handlers for Song Requests
+  // Handlers for Song Requests (synced with backend DB)
   const handleAddRequest = (newReq: Omit<SongRequest, 'id' | 'timestamp' | 'votes'>) => {
     const item: SongRequest = {
       ...newReq,
@@ -1538,22 +1516,19 @@ export default function App() {
       timestamp: Date.now(),
       votes: 1,
     };
-    const updated = [item, ...requests];
-    setRequests(updated);
-    localStorage.setItem('rebeldia_requests', JSON.stringify(updated));
+    setRequests((prev) => [item, ...prev]);
+    syncLiveState().catch(() => {});
   };
 
   const handleVoteRequest = (id: string) => {
-    const updated = requests.map((r) => (r.id === id ? { ...r, votes: r.votes + 1 } : r));
-    setRequests(updated);
-    localStorage.setItem('rebeldia_requests', JSON.stringify(updated));
+    setRequests((prev) => prev.map((r) => (r.id === id ? { ...r, votes: r.votes + 1 } : r)));
     const numId = parseInt(id, 10);
     if (!isNaN(numId)) {
-      api.voteSongRequest(numId).catch(() => {});
+      api.voteSongRequest(numId).then(() => syncLiveState()).catch(() => {});
     }
   };
 
-  // Handlers for Mural Messages
+  // Handlers for Mural Messages (synced with backend DB)
   const handleAddMessage = (newMsg: Omit<ShoutoutMessage, 'id' | 'timestamp' | 'likes'>) => {
     const item: ShoutoutMessage = {
       ...newMsg,
@@ -1562,36 +1537,33 @@ export default function App() {
       likes: 0,
       isPinned: false,
     };
-    const updated = [item, ...messages];
-    setMessages(updated);
-    localStorage.setItem('rebeldia_messages', JSON.stringify(updated));
+    setMessages((prev) => [item, ...prev]);
+    syncLiveState().catch(() => {});
   };
 
   const handleLikeMessage = (id: string) => {
-    const updated = messages.map((m) => {
-      if (m.id === id) {
-        const nextLiked = !m.hasLiked;
-        return {
-          ...m,
-          likes: nextLiked ? m.likes + 1 : m.likes - 1,
-          hasLiked: nextLiked,
-        };
-      }
-      return m;
-    });
-    setMessages(updated);
-    localStorage.setItem('rebeldia_messages', JSON.stringify(updated));
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id === id) {
+          const nextLiked = !m.hasLiked;
+          return {
+            ...m,
+            likes: nextLiked ? m.likes + 1 : Math.max(0, m.likes - 1),
+            hasLiked: nextLiked,
+          };
+        }
+        return m;
+      })
+    );
+    const numId = parseInt(id, 10);
+    if (!isNaN(numId)) {
+      api.likeShoutout(numId).then(() => syncLiveState()).catch(() => {});
+    }
   };
 
-  const handleSaveConfig = (newConfig: RadioStationConfig) => {
+  const handleSaveConfig = async (newConfig: RadioStationConfig) => {
     setStationConfig(newConfig);
-    localStorage.setItem('rebeldia_station_config', JSON.stringify(newConfig));
-    api.saveStationConfig(newConfig);
-  };
-
-  const handleSaveAlarm = (newAlarm: RadioAlarm) => {
-    setAlarm(newAlarm);
-    localStorage.setItem('rebeldia_alarm', JSON.stringify(newAlarm));
+    await api.saveStationConfig(newConfig);
   };
 
   // PWA Install trigger
@@ -1622,6 +1594,61 @@ export default function App() {
       alert('Link da rádio copiado para a área de transferência!');
     }
   };
+
+  const rawInstagramHandle = (stationConfig.instagramHandle || 'rebeldiafm').trim();
+  const resolvedInstagramUrl =
+    rawInstagramHandle.startsWith('http://') || rawInstagramHandle.startsWith('https://')
+      ? rawInstagramHandle
+      : `https://instagram.com/${rawInstagramHandle.replace(/^@/, '')}`;
+  const resolvedFacebookUrl = (stationConfig.facebookUrl || 'https://facebook.com/rebeldiafm').trim();
+
+  const renderPlatformSocialIcons = () => (
+    <div className="flex items-center gap-1 sm:gap-1.5">
+      <button
+        type="button"
+        onClick={() => openInstallModal('android')}
+        className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/5 transition cursor-pointer flex items-center justify-center"
+        title="Instalar App Android"
+        aria-label="Instalar App Android"
+      >
+        <AndroidIcon monochrome className="w-4 h-4 sm:w-5 sm:h-5" />
+      </button>
+
+      <button
+        type="button"
+        onClick={() => openInstallModal('ios')}
+        className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/5 transition cursor-pointer flex items-center justify-center"
+        title="Instalar App iPhone / iOS"
+        aria-label="Instalar App iPhone / iOS"
+      >
+        <AppleIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+      </button>
+
+      <div className="w-px h-4 bg-zinc-800/80 mx-0.5" />
+
+      <a
+        href={resolvedInstagramUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/5 transition cursor-pointer flex items-center justify-center"
+        title="Instagram da Rebeldia FM"
+        aria-label="Instagram da Rebeldia FM"
+      >
+        <Instagram className="w-4 h-4 sm:w-5 sm:h-5" />
+      </a>
+
+      <a
+        href={resolvedFacebookUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/5 transition cursor-pointer flex items-center justify-center"
+        title="Facebook da Rebeldia FM"
+        aria-label="Facebook da Rebeldia FM"
+      >
+        <Facebook className="w-4 h-4 sm:w-5 sm:h-5" />
+      </a>
+    </div>
+  );
 
   return (
     <div
@@ -1657,61 +1684,9 @@ export default function App() {
             )}
           </div>
 
-          {/* Action Tools Header */}
-          <div className="flex items-center gap-2">
-            {/* Google Auth Button */}
-            {!user ? (
-              <button
-                onClick={signInWithGoogle}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-zinc-200 text-black text-xs font-bold transition shadow-sm cursor-pointer"
-                title="Entrar com Google"
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Entrar</span>
-              </button>
-            ) : (
-              <div className="flex items-center gap-1.5">
-                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-zinc-900 border border-zinc-700 text-xs text-zinc-200">
-                  {user.photoURL ? (
-                    <img src={user.photoURL} alt={user.displayName || ''} className="w-4 h-4 rounded-full" />
-                  ) : (
-                    <UserIcon className="w-3.5 h-3.5 text-zinc-400" />
-                  )}
-                  <span className="max-w-[100px] truncate text-[11px] font-medium hidden sm:inline">
-                    {user.displayName?.split(' ')[0] || user.email?.split('@')[0]}
-                  </span>
-                </div>
-                <button
-                  onClick={signOut}
-                  className="p-2 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-white text-xs transition cursor-pointer"
-                  title="Sair da conta"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-
-            {/* Install Button Unified (Android & Apple / iPhone) */}
-            <button
-              onClick={() => openInstallModal()}
-              className="p-1.5 sm:px-2.5 sm:py-2 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white transition shadow-sm cursor-pointer flex items-center justify-center gap-1.5 group"
-              title="Instalar App Oficial (Android & iPhone)"
-              aria-label="Instalar App Oficial (Android & iPhone)"
-            >
-              <AndroidIcon className="w-4 h-4 sm:w-4.5 sm:h-4.5 group-hover:scale-110 transition-transform" />
-              <div className="w-[1px] h-3.5 bg-zinc-700" />
-              <AppleIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-zinc-200 group-hover:text-white group-hover:scale-110 transition-transform" />
-            </button>
-
-            {/* Equalizer & Audio Settings button (Copiado para o topo) */}
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="p-1.5 sm:p-2 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white transition shadow-sm cursor-pointer flex items-center justify-center"
-              title="Configurações & Áudio HD"
-              aria-label="Configurações & Áudio HD"
-            >
-              <Sliders className="w-5 h-5 text-amber-400" />
-            </button>
+          {/* Action Tools Header: 4 ícones discretos (Android, Apple, Instagram, Facebook) */}
+          <div className="flex items-center">
+            {renderPlatformSocialIcons()}
           </div>
         </div>
       </header>
@@ -1736,14 +1711,14 @@ export default function App() {
             <div className="flex items-center gap-1.5">
               {isNavSticky && (
                 <div
-                  className="flex items-center justify-center p-[9px] rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/80 cursor-pointer transition flex-shrink-0 animate-in fade-in zoom-in-95 duration-200 mr-[10px] active:scale-95 select-none"
+                  className="flex items-center justify-center cursor-pointer transition flex-shrink-0 animate-in fade-in zoom-in-95 duration-200 mr-2 active:scale-95 select-none"
                   onClick={() => {
                     navigateTab('player');
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
                   title="Rebeldia FM - Voltar ao topo"
                 >
-                  <RebeldiaLogo variant="icon" size="xs" className="h-5 w-auto" />
+                  <RebeldiaLogo variant="full" size="sm" customLogoUrl={stationLogos.headerLogo} />
                 </div>
               )}
 
@@ -1880,16 +1855,6 @@ export default function App() {
               />
               <div className="absolute inset-0 bg-gradient-to-b from-zinc-950/85 via-zinc-950/60 to-zinc-950/90 pointer-events-none" />
 
-              {/* Botão de Atalho para Modo Música (Tela Cheia) */}
-              <button
-                onClick={() => setIsMusicModeOpen(true)}
-                className="absolute top-4 right-4 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-white/10 hover:border-amber-400/40 text-xs font-mono font-bold transition shadow-lg cursor-pointer group active:scale-95"
-                title="Abrir MODO MÚSICA em Tela Cheia"
-              >
-                <Maximize2 className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
-                <span className="hidden xs:inline">Modo Música</span>
-              </button>
-
               {/* Animated VU Ondas Background Visualizer */}
               <CardBackgroundVisualizer
                 isPlaying={isPlaying}
@@ -1963,24 +1928,27 @@ export default function App() {
                 </div>
 
                 {/* Nome da Música Que Está Tocando - Logo Abaixo do Primeiro Botão Redondo */}
-                <div className="w-full max-w-lg px-2 flex flex-col items-center space-y-1.5">
+                <div className="w-full max-w-lg px-[5px] sm:px-2 flex flex-col items-center space-y-1.5">
 
                   {/* Nome da Faixa Principal */}
-                  <h2
-                    className="text-[22px] sm:text-[28px] font-black text-white font-display tracking-tight leading-snug drop-shadow"
-                    title={
-                      streamMetadata.hasLiveMetadata
-                        ? `${streamMetadata.song} - ${streamMetadata.artist}`
-                        : currentLiveProgram
-                        ? currentLiveProgram.title
-                        : stationConfig.name
-                    }
-                  >
-                    {streamMetadata.hasLiveMetadata
-                      ? streamMetadata.song
-                      : currentLiveProgram
-                      ? currentLiveProgram.title
-                      : stationConfig.name}
+                  <h2 className="w-full text-[22px] sm:text-[28px] font-black text-white font-display tracking-tight leading-snug drop-shadow">
+                    <MarqueeText
+                      text={
+                        streamMetadata.hasLiveMetadata
+                          ? streamMetadata.song
+                          : currentLiveProgram
+                          ? currentLiveProgram.title
+                          : stationConfig.name
+                      }
+                      align="center"
+                      title={
+                        streamMetadata.hasLiveMetadata
+                          ? `${streamMetadata.song} - ${streamMetadata.artist}`
+                          : currentLiveProgram
+                          ? currentLiveProgram.title
+                          : stationConfig.name
+                      }
+                    />
                   </h2>
 
                   {/* Nome do Artista ou Apresentador */}
@@ -2249,14 +2217,10 @@ export default function App() {
         artworkUrl={discDisplay.imageUrl}
         stationConfig={stationConfig}
         equalizerPreset={equalizerPreset}
-        timerSecondsRemaining={timerSecondsRemaining}
-        alarm={alarm}
         onTogglePlay={togglePlay}
         onReloadStream={reloadStream}
         onVolumeChange={handleVolumeChange}
         onToggleMute={toggleMute}
-        onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
-        onOpenAlarm={() => setIsAlarmOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenRequests={() => navigateTab('requests')}
         onGoToPlayerTab={() => navigateTab('player')}
@@ -2265,8 +2229,8 @@ export default function App() {
       />
 
       {/* Studio Monochromatic Footer */}
-      <footer className="border-t border-zinc-800/80 bg-zinc-950 py-8 pb-36 px-[8px] sm:px-[30px] text-center text-xs text-zinc-400">
-        <div className="w-full flex flex-col items-center space-y-4">
+      <footer className="border-t border-zinc-800/80 bg-zinc-950 pt-8 pb-0 text-center text-xs text-zinc-400">
+        <div className="w-full px-[8px] sm:px-[30px] flex flex-col items-center space-y-4 pb-8">
           <RebeldiaLogo
             variant="full"
             size="sm"
@@ -2308,8 +2272,44 @@ export default function App() {
             </span>
           </div>
 
-          {/* Gerenciador / Painel Admin, Recursos & Área de Locutores */}
+          {/* 4 ícones discretos no rodapé (Android, Apple, Instagram, Facebook) */}
+          <div className="flex items-center justify-center">
+            {renderPlatformSocialIcons()}
+          </div>
+
+          {/* Gerenciador / Painel Admin, Recursos, Área de Locutores & Entrar com Google */}
           <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
+            {/* Entrar com Google (movido do cabeçalho para o rodapé) */}
+            {!user ? (
+              <button
+                onClick={signInWithGoogle}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white border border-zinc-700 hover:border-zinc-500 text-xs font-bold transition shadow-lg active:scale-95 cursor-pointer group"
+                title="Entrar com Google"
+              >
+                <LogIn className="w-4 h-4 text-zinc-300 group-hover:text-white transition-colors" />
+                <span>Entrar com Google</span>
+              </button>
+            ) : (
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-2xl bg-zinc-900 border border-zinc-700 text-xs text-zinc-200 shadow-lg">
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt={user.displayName || ''} className="w-4 h-4 rounded-full" />
+                ) : (
+                  <UserIcon className="w-3.5 h-3.5 text-zinc-400" />
+                )}
+                <span className="max-w-[140px] truncate text-xs font-bold">
+                  {user.displayName?.split(' ')[0] || user.email?.split('@')[0]}
+                </span>
+                <button
+                  onClick={signOut}
+                  className="p-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition cursor-pointer"
+                  title="Sair da conta"
+                  aria-label="Sair da conta"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             {/* Área do Locutor / Modo Coringa */}
             <button
               onClick={() => setIsHostAuthOpen(true)}
@@ -2352,6 +2352,31 @@ export default function App() {
             </button>
           </div>
         </div>
+
+        {/* Barra do Desenvolvedor */}
+        <div className="w-full border-t border-zinc-900 bg-black/50 pt-3.5 pb-24 sm:pb-28 px-[10px] sm:px-[30px]">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[11px] text-zinc-500">
+            <span className="text-zinc-500">Desenvolvido por</span>
+            <a
+              href="https://www.oz.com.br"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-zinc-300 hover:text-white transition"
+            >
+              www.oz.com.br
+            </a>
+            <span className="text-zinc-600">-</span>
+            <a
+              href="https://wa.me/5548991984678"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono tabular-nums text-zinc-400 hover:text-white transition"
+              title="Contato WhatsApp do Desenvolvedor"
+            >
+              48 99198 4678
+            </a>
+          </div>
+        </div>
       </footer>
 
       {/* Modals */}
@@ -2362,13 +2387,6 @@ export default function App() {
         onInstallClick={handleInstallClick}
         isInstalled={isAppInstalled}
         initialPlatform={installPlatform}
-      />
-
-      <SleepTimerModal
-        isOpen={isSleepTimerOpen}
-        onClose={() => setIsSleepTimerOpen(false)}
-        timerMinutesRemaining={timerSecondsRemaining}
-        onSetTimer={handleSetSleepTimer}
       />
 
       <SettingsModal
@@ -2383,20 +2401,11 @@ export default function App() {
         onSelectPalette={(id) => setCurrentPaletteId(id)}
       />
 
-      <AlarmClockModal
-        isOpen={isAlarmOpen}
-        onClose={() => setIsAlarmOpen(false)}
-        alarm={alarm}
-        onSaveAlarm={handleSaveAlarm}
-        onTriggerPlay={togglePlay}
-      />
-
       <AdminManagerModal
         isOpen={isAdminOpen}
         onClose={handleCloseAdmin}
         onRefreshData={() => {
           loadBackendData();
-          setInstitutionalData(getSavedInstitutionalData());
         }}
         onNavigateToTab={(tab) => {
           handleCloseAdmin();
@@ -2443,7 +2452,6 @@ export default function App() {
         onUpdateProgram={async (updated) => {
           const next = schedulePrograms.map((p) => (p.id === updated.id ? updated : p));
           setSchedulePrograms(next);
-          localStorage.setItem('rebeldia_schedule', JSON.stringify(next));
           const numId = typeof updated.id === 'number' ? updated.id : parseInt(String(updated.id).replace(/\D/g, ''), 10);
           if (!isNaN(numId) && numId > 0) {
             try {
@@ -2462,6 +2470,7 @@ export default function App() {
                 highlightsJson: updated.highlights ? JSON.stringify(updated.highlights) : null,
                 photoGalleryJson: updated.photoGallery ? JSON.stringify(updated.photoGallery) : null,
               });
+              loadBackendData().catch(() => {});
             } catch {
               // fallback to local state
             }
