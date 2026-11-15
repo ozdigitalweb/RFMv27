@@ -53,7 +53,6 @@ import {
   LiveTakeover,
   HostAccount,
   StationLogosConfig,
-  ScheduleSwapRecord,
 } from './types';
 import { InstallModal } from './components/InstallModal';
 import { SongRequestsModal } from './components/SongRequestsModal';
@@ -90,15 +89,6 @@ import {
 import { applyTheme, getSavedPaletteId } from './utils/theme';
 import { getSavedInstitutionalData, saveInstitutionalData, InstitutionalData } from './data/institutional';
 import { applyClientSeo } from './utils/seo';
-import { findProgramBySlug, getProgramLogoSrc, getProgramSlug } from './utils/slug';
-import {
-  ensureSystemHosts,
-  findLinkedHostAccount,
-  resolveProgramWhatsapp,
-  isCoringaHost,
-  applyEffectiveSwapsToPrograms,
-  getLocalTodayYmd,
-} from './utils/hostPhone';
 import { LogIn, LogOut, User as UserIcon, Database, ShieldCheck, KeyRound, Flame, Gift, Sparkles as SparklesIcon, UserCheck } from 'lucide-react';
 
 export default function App() {
@@ -122,12 +112,9 @@ export default function App() {
     if (typeof window !== 'undefined' && window.location.pathname !== '/admin') {
       window.history.pushState({}, '', '/admin');
     }
-    applyDynamicFavicon('/reb_mascot.jpg');
     applyClientSeo({
       title: 'Painel Administrativo | Rebeldia FM - Rádio Web',
       description: 'Gerenciador da grade de programação, Hotsites, pedidos musicais, mural e configurações de SEO & GEO.',
-      ogImage: '/reb_mascot.jpg',
-      faviconUrl: '/reb_mascot.jpg',
     });
   }, []);
 
@@ -154,34 +141,15 @@ export default function App() {
       return null;
     }
   });
-  const [hostToken, setHostToken] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem('rebeldia_host_token');
-    } catch {
-      return null;
-    }
-  });
-  const [scheduleSwaps, setScheduleSwaps] = useState<ScheduleSwapRecord[]>([]);
 
-  const handleHostLogin = (host: HostAccount, token?: string | null) => {
+  const handleHostLogin = (host: HostAccount) => {
     setCurrentLoggedInHost(host);
     localStorage.setItem('rebeldia_logged_host', JSON.stringify(host));
-    if (token !== undefined) {
-      if (token) {
-        setHostToken(token);
-        localStorage.setItem('rebeldia_host_token', token);
-      } else {
-        setHostToken(null);
-        localStorage.removeItem('rebeldia_host_token');
-      }
-    }
   };
 
   const handleHostLogout = () => {
     setCurrentLoggedInHost(null);
-    setHostToken(null);
     localStorage.removeItem('rebeldia_logged_host');
-    localStorage.removeItem('rebeldia_host_token');
   };
 
   // Theme & Palette State
@@ -222,25 +190,6 @@ export default function App() {
     }
   });
 
-  // Host Accounts (Cadastro de Locutores) State & Programas com WhatsApp resolvido pelo Locutor
-  const [hostAccounts, setHostAccounts] = useState<HostAccount[]>(() =>
-    ensureSystemHosts(INITIAL_HOST_ACCOUNTS, INITIAL_HOST_ACCOUNTS)
-  );
-
-  const resolvedSchedulePrograms = useMemo<ProgramItem[]>(() => {
-    const baseList = schedulePrograms.length > 0 ? schedulePrograms : INITIAL_PROGRAMS;
-    const todayYmd = getLocalTodayYmd();
-    const withSwaps = applyEffectiveSwapsToPrograms(baseList, scheduleSwaps, todayYmd);
-    return withSwaps.map((prog) => {
-      const linkedHost = findLinkedHostAccount(prog, hostAccounts);
-      return {
-        ...prog,
-        hostAccountId: prog.hostAccountId || linkedHost?.id,
-        whatsappNumber: resolveProgramWhatsapp(prog, hostAccounts, stationConfig.whatsappNumber),
-      };
-    });
-  }, [schedulePrograms, scheduleSwaps, hostAccounts, stationConfig.whatsappNumber]);
-
   // Client-side cache migration to permanently purge any stale "Canoas" references
   useEffect(() => {
     try {
@@ -267,18 +216,11 @@ export default function App() {
   const [stationLogos, setStationLogos] = useState<StationLogosConfig>(getStationLogos);
 
   useEffect(() => {
-    const isOnProgramSlug = () =>
-      typeof window !== 'undefined' &&
-      window.location.pathname.startsWith('/programas/') &&
-      window.location.pathname.replace(/\/+$/, '') !== '/programas';
-
     const handleLogosUpdate = (e: Event) => {
       const customEvent = e as CustomEvent<StationLogosConfig>;
       if (customEvent.detail) {
         setStationLogos(customEvent.detail);
-        if (!isOnProgramSlug()) {
-          applyDynamicFavicon('/reb_mascot.jpg');
-        }
+        if (customEvent.detail.faviconIcon) applyDynamicFavicon(customEvent.detail.faviconIcon);
         if (customEvent.detail.windowsTaskbarIcon) applyDynamicWindowsTile(customEvent.detail.windowsTaskbarIcon);
       }
     };
@@ -287,9 +229,7 @@ export default function App() {
     fetchAndSyncServerLogos().then((logos) => {
       if (logos) {
         setStationLogos(logos);
-        if (!isOnProgramSlug()) {
-          applyDynamicFavicon('/reb_mascot.jpg');
-        }
+        if (logos.faviconIcon) applyDynamicFavicon(logos.faviconIcon);
         if (logos.windowsTaskbarIcon) applyDynamicWindowsTile(logos.windowsTaskbarIcon);
       }
     });
@@ -330,47 +270,42 @@ export default function App() {
 
     setActiveTab(tab);
     setSelectedHotsiteProgram(null);
-    applyDynamicFavicon('/reb_mascot.jpg');
     if (typeof window !== 'undefined' && window.location.pathname !== targetPath) {
       window.history.pushState({}, '', targetPath);
     }
     api.getPageSeo(targetPath).then((seo) => {
-      if (seo) applyClientSeo({ ...seo, ogImage: '/reb_mascot.jpg', faviconUrl: '/reb_mascot.jpg' });
+      if (seo) applyClientSeo(seo);
     });
   }, []);
 
   const handleSelectProgramHotsite = useCallback((prog: ProgramItem) => {
     setSelectedHotsiteProgram(prog);
-    const slug = getProgramSlug(prog);
+    const slug = (prog.seedKey || prog.title)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
     const hotsitePath = `/programas/${slug}`;
     if (typeof window !== 'undefined' && window.location.pathname !== hotsitePath) {
       window.history.pushState({}, '', hotsitePath);
     }
-    const programIcon = getProgramLogoSrc(prog);
-    const programOgImage = programIcon.startsWith('data:')
-      ? `/api/program-og-image/${encodeURIComponent(slug)}?v=${programIcon.length}`
-      : programIcon;
     applyClientSeo({
       title: `${prog.title} - Com ${prog.host} | Rebeldia FM`,
       description: prog.description || `Hotsite oficial do programa ${prog.title} na Rebeldia FM.`,
-      canonicalUrl:
-        typeof window !== 'undefined'
-          ? `${window.location.origin}${hotsitePath}`
-          : `https://rebeldiafm.com.br${hotsitePath}`,
+      canonicalUrl: `https://rebeldiafm.com.br${hotsitePath}`,
       ogTitle: `${prog.title} - Com ${prog.host}`,
       ogDescription: prog.description || `Ouça ${prog.title} na Rebeldia FM com ${prog.host}.`,
-      ogImage: programOgImage,
-      faviconUrl: programIcon,
+      ogImage: prog.avatarUrl || prog.bannerUrl || '/reb_mascot.jpg',
     });
   }, []);
 
   const handleCloseProgramHotsite = useCallback(() => {
     setSelectedHotsiteProgram(null);
-    applyDynamicFavicon('/reb_mascot.jpg');
     if (typeof window !== 'undefined' && window.location.pathname.startsWith('/programas/')) {
       window.history.pushState({}, '', '/programas');
       api.getPageSeo('/programas').then((seo) => {
-        if (seo) applyClientSeo({ ...seo, ogImage: '/reb_mascot.jpg', faviconUrl: '/reb_mascot.jpg' });
+        if (seo) applyClientSeo(seo);
       });
     }
   }, []);
@@ -384,41 +319,38 @@ export default function App() {
       if (clean === '/admin') {
         setIsAdminOpen(true);
         setSelectedHotsiteProgram(null);
-        applyDynamicFavicon('/reb_mascot.jpg');
         return;
       }
 
       setIsAdminOpen(false);
 
       if (clean.startsWith('/programas/') && clean !== '/programas') {
-        const slug = decodeURIComponent(clean.replace('/programas/', '').trim()).toLowerCase();
+        const slug = clean.replace('/programas/', '').trim();
         setActiveTab('schedule');
-        const found = findProgramBySlug(resolvedSchedulePrograms, slug);
+        const found = schedulePrograms.find((p) => {
+          const progSlug = (p.seedKey || p.title)
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-|-$/g, '');
+          return progSlug === slug || String(p.id) === slug;
+        });
         if (found) {
           setSelectedHotsiteProgram(found);
-          const programIcon = getProgramLogoSrc(found);
-          const resolvedSlug = getProgramSlug(found) || slug;
-          const programOgImage = programIcon.startsWith('data:')
-            ? `/api/program-og-image/${encodeURIComponent(resolvedSlug)}?v=${programIcon.length}`
-            : programIcon;
           applyClientSeo({
             title: `${found.title} - Com ${found.host} | Rebeldia FM`,
             description: found.description || `Hotsite oficial do programa ${found.title} na Rebeldia FM.`,
-            canonicalUrl:
-              typeof window !== 'undefined'
-                ? `${window.location.origin}${clean}`
-                : `https://rebeldiafm.com.br${clean}`,
+            canonicalUrl: `https://rebeldiafm.com.br${clean}`,
             ogTitle: `${found.title} - Com ${found.host}`,
             ogDescription: found.description || `Ouça ${found.title} na Rebeldia FM com ${found.host}.`,
-            ogImage: programOgImage,
-            faviconUrl: programIcon,
+            ogImage: found.avatarUrl || found.bannerUrl || '/reb_mascot.jpg',
           });
           return;
         }
       }
 
       setSelectedHotsiteProgram(null);
-      applyDynamicFavicon('/reb_mascot.jpg');
 
       if (clean === '/programas') {
         setActiveTab('schedule');
@@ -433,7 +365,7 @@ export default function App() {
       }
 
       api.getPageSeo(clean).then((seo) => {
-        if (seo) applyClientSeo({ ...seo, ogImage: '/reb_mascot.jpg', faviconUrl: '/reb_mascot.jpg' });
+        if (seo) applyClientSeo(seo);
       });
     };
 
@@ -441,7 +373,7 @@ export default function App() {
     handlePopState();
 
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [resolvedSchedulePrograms]);
+  }, [schedulePrograms]);
 
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
   const [installPlatform, setInstallPlatform] = useState<'android' | 'ios'>('android');
@@ -521,7 +453,6 @@ export default function App() {
   });
   const [isTakeoverModalOpen, setIsTakeoverModalOpen] = useState(false);
   const [takeoverTargetProgram, setTakeoverTargetProgram] = useState<ProgramItem | null>(null);
-  const [takeoverInitialCoringa, setTakeoverInitialCoringa] = useState(false);
 
   const handleStartTakeover = (takeover: LiveTakeover) => {
     setLiveTakeover(takeover);
@@ -535,15 +466,17 @@ export default function App() {
     api.clearLiveTakeover().catch(() => {});
   };
 
-  const handleOpenTakeoverForProgram = (prog?: ProgramItem, coringaMode = false) => {
+  const handleOpenTakeoverForProgram = (prog?: ProgramItem) => {
     setTakeoverTargetProgram(prog || null);
-    setTakeoverInitialCoringa(Boolean(coringaMode));
     setIsTakeoverModalOpen(true);
   };
 
   // PWA Install prompt state
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+    const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isAppInstalled, setIsAppInstalled] = useState(false);
+
+  // Host Accounts (Cadastro de Locutores) State
+  const [hostAccounts, setHostAccounts] = useState<HostAccount[]>(INITIAL_HOST_ACCOUNTS);
 
   // Live Song Artwork state (fetched from iTunes when a real song is on air)
   const [liveSongArtwork, setLiveSongArtwork] = useState<string | null>(null);
@@ -580,18 +513,7 @@ export default function App() {
   // Load Community Data, Schedule, Promo Banners and Live Takeovers from Cloud SQL Backend API
   const loadBackendData = useCallback(async () => {
     try {
-      const [
-        backendRequests,
-        backendMessages,
-        backendStats,
-        backendSchedule,
-        backendConfig,
-        backendBanners,
-        backendTakeover,
-        backendHosts,
-        backendInstitutional,
-        backendSwaps,
-      ] = await Promise.allSettled([
+      const [backendRequests, backendMessages, backendStats, backendSchedule, backendConfig, backendBanners, backendTakeover, backendHosts, backendInstitutional] = await Promise.allSettled([
         api.getSongRequests(),
         api.getShoutouts(),
         api.getStats(),
@@ -601,12 +523,7 @@ export default function App() {
         api.getLiveTakeover(),
         api.getHostAccounts(),
         api.getInstitutionalData(),
-        api.getScheduleSwaps(),
       ]);
-
-      if (backendSwaps.status === 'fulfilled' && Array.isArray(backendSwaps.value)) {
-        setScheduleSwaps(backendSwaps.value);
-      }
 
       if (backendInstitutional.status === 'fulfilled' && backendInstitutional.value) {
         setInstitutionalData((prev) => ({ ...prev, ...backendInstitutional.value }));
@@ -614,7 +531,7 @@ export default function App() {
       }
 
       if (backendHosts.status === 'fulfilled' && Array.isArray(backendHosts.value) && backendHosts.value.length > 0) {
-        setHostAccounts(ensureSystemHosts(backendHosts.value, INITIAL_HOST_ACCOUNTS));
+        setHostAccounts(backendHosts.value);
       }
 
       if (backendTakeover.status === 'fulfilled' && backendTakeover.value) {
@@ -746,7 +663,6 @@ export default function App() {
 
           return {
             id: item.id !== undefined && item.id !== null ? String(item.id) : (item.title ? `prog-${item.title.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${index}` : `prog-${index}`),
-            seedKey: (item as any).seedKey || undefined,
             dayOfWeek: item.dayOfWeek,
             startTime: item.startTime,
             endTime: item.endTime,
@@ -923,13 +839,12 @@ export default function App() {
   const pulseRingRef = useRef<HTMLDivElement | null>(null);
   const togglePlayRef = useRef<() => void>(() => {});
 
-  // Audio reactivity for central vinyl circle: 8px translucent border synced directly to the shared rhythmic beat engine
+  // Audio reactivity for central vinyl circle: 8px translucent border with fade pulsing with rhythm and oscillating brightness with the beat
   useEffect(() => {
     const el = pulseRingRef.current;
     if (!el) return;
 
-    const isAudible = isPlaying && !isBuffering && !isMuted && volume > 0;
-    if (!isAudible) {
+    if (!isPlaying) {
       el.style.transform = 'scale(1)';
       el.style.opacity = '0.23';
       el.style.filter = 'brightness(0.85) drop-shadow(0 0 5px var(--color-primary, #f59e0b))';
@@ -938,24 +853,79 @@ export default function App() {
     }
 
     let animId: number;
+    let baselineEnergy = 90;
+    let peakTransient = 0;
+    let fallbackTimer = 0;
 
     const tick = () => {
-      const { beatPulse } = radioAudio.getBeatMetrics();
+      const freq = radioAudio.getFrequencyData();
       const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
 
-      if (pulseRingRef.current) {
-        const scaleBoost = isMobile ? 0.095 : 0.082;
-        const scale = 1 + beatPulse * scaleBoost;
+      let hasData = false;
+      let kick = 0;
+      for (let i = 0; i < 4; i++) {
+        const v = freq[i] || 0;
+        if (v > 0) hasData = true;
+        kick += v;
+      }
+      kick = kick / 4; // Sub-bass / kick 0..255
 
-        const opacity = 0.22 + beatPulse * (isMobile ? 0.58 : 0.52);
-        const glowSpread = (isMobile ? 6 : 8) + beatPulse * (isMobile ? 24 : 28);
-        const innerGlow = (isMobile ? 2 : 3) + beatPulse * (isMobile ? 12 : 14);
-        const brightness = 1.0 + beatPulse * 0.85;
+      let snare = 0;
+      for (let i = 16; i < 26; i++) {
+        const v = freq[i] || 0;
+        if (v > 0) hasData = true;
+        snare += v;
+      }
+      snare = snare / 10; // Mid / Snare attack 0..255
+
+      // Rhythmic energy emphasizing kick transients with snare accents
+      const instantEnergy = kick * 0.78 + snare * 0.22;
+      let beatImpact = 0;
+
+      if (hasData && instantEnergy > 10) {
+        // Slowly update moving baseline (adapts to overall volume over ~1.5s)
+        baselineEnergy = baselineEnergy * 0.96 + instantEnergy * 0.04;
+        const diff = instantEnergy - baselineEnergy;
+        const threshold = Math.max(10, baselineEnergy * 0.10);
+
+        if (diff > threshold) {
+          const rawSpike = (diff - threshold) / Math.max(20, baselineEnergy * 0.45);
+          beatImpact = Math.min(1.0, Math.max(0, rawSpike));
+        } else {
+          // Off-beat subtle rhythmic bounce
+          beatImpact = Math.max(0, (instantEnergy / (baselineEnergy * 1.5)) * 0.22);
+        }
+      } else {
+        // High-precision rhythmic fallback simulating musical 124 BPM beat pulse
+        fallbackTimer += 0.065;
+        const beatCycle = (Math.sin(fallbackTimer * 3.14) + 1) * 0.5;
+        beatImpact = Math.pow(beatCycle, 4); // Sharp beat peaks
+      }
+
+      // Fast attack (instant snap on the hit), bouncy musical decay
+      if (beatImpact > peakTransient) {
+        peakTransient = peakTransient * 0.15 + beatImpact * 0.85;
+      } else {
+        peakTransient = peakTransient * 0.82; // Bouncy ~80ms decay
+      }
+
+      if (pulseRingRef.current) {
+        // Calibrated responsive pulse scale:
+        // On mobile: 1.0 -> 1.10 (produces ~18px visible pop)
+        // On desktop: 1.0 -> 1.085 (produces ~20px visible pop)
+        const scaleBoost = isMobile ? 0.095 : 0.082;
+        const scale = 1 + peakTransient * scaleBoost;
+
+        // Dynamic opacity and radiant glow synchronized to the beat
+        const opacity = 0.22 + peakTransient * (isMobile ? 0.58 : 0.52);
+        const glowSpread = (isMobile ? 6 : 8) + peakTransient * (isMobile ? 24 : 28);
+        const innerGlow = (isMobile ? 2 : 3) + peakTransient * (isMobile ? 12 : 14);
+        const brightness = 1.0 + peakTransient * 0.85;
 
         pulseRingRef.current.style.transform = `scale(${scale.toFixed(3)})`;
         pulseRingRef.current.style.opacity = opacity.toFixed(2);
         pulseRingRef.current.style.filter = `brightness(${brightness.toFixed(2)}) drop-shadow(0 0 ${glowSpread.toFixed(1)}px var(--color-primary, #f59e0b))`;
-        pulseRingRef.current.style.boxShadow = `0 0 ${glowSpread.toFixed(1)}px ${(2 + beatPulse * 3).toFixed(1)}px var(--color-primary, #f59e0b), inset 0 0 ${innerGlow.toFixed(1)}px var(--color-primary, #f59e0b)`;
+        pulseRingRef.current.style.boxShadow = `0 0 ${glowSpread.toFixed(1)}px ${(2 + peakTransient * 3).toFixed(1)}px var(--color-primary, #f59e0b), inset 0 0 ${innerGlow.toFixed(1)}px var(--color-primary, #f59e0b)`;
       }
 
       animId = requestAnimationFrame(tick);
@@ -965,7 +935,7 @@ export default function App() {
     return () => {
       cancelAnimationFrame(animId);
     };
-  }, [isPlaying, isBuffering, isMuted, volume]);
+  }, [isPlaying]);
 
   // Initialize audio element listeners and MediaSession API
   useEffect(() => {
@@ -986,7 +956,6 @@ export default function App() {
     const handlePause = () => {
       setIsPlaying(false);
       setIsBuffering(false);
-      radioAudio.resetLiveAudioLatch();
     };
     const handleError = () => {
       setIsBuffering(false);
@@ -1107,10 +1076,8 @@ export default function App() {
   // Inicia a transmissão executando sempre um reload forçado do streaming ao vivo
   const startStreamWithReload = useCallback(() => {
     radioAudio.stopSynthTestBeat();
-    radioAudio.resetLiveAudioLatch();
     setHasError(false);
     setIsBuffering(true);
-    radioAudio.ensureCorsEnabled();
     radioAudio.initWebAudio();
     radioAudio.resumeContext();
     radioAudio.setVolumeAndMute(volume, isMuted);
@@ -1216,7 +1183,7 @@ export default function App() {
 
   // Scheduled Base Program based on streamMetadata (live broadcast detection) or current day and time
   const scheduledBaseProgram = useMemo<ProgramItem>(() => {
-    const progList = resolvedSchedulePrograms.length > 0 ? resolvedSchedulePrograms : INITIAL_PROGRAMS;
+    const progList = schedulePrograms.length > 0 ? schedulePrograms : INITIAL_PROGRAMS;
 
     // 0. Detecção inteligente: se o streamMetadata contiver o nome de um programa da grade (ex: "REPRISE - - Programa Avox Do Brasil 29...")
     if (streamMetadata?.song) {
@@ -1287,111 +1254,28 @@ export default function App() {
       }
       return matching;
     }
+    return DEFAULT_REB_PROGRAM;
+  }, [schedulePrograms, streamMetadata.song]);
 
-    return {
-      ...DEFAULT_REB_PROGRAM,
-      whatsappNumber: resolveProgramWhatsapp(DEFAULT_REB_PROGRAM, hostAccounts, stationConfig.whatsappNumber),
-    };
-  }, [resolvedSchedulePrograms, streamMetadata.song, hostAccounts, stationConfig.whatsappNumber]);
-
-  // Current Live Program based on base program + active takeover / Modo Coringa
+  // Current Live Program based on base program + active takeover substitution (locutor cumprindo horário)
   const currentLiveProgram = useMemo<ProgramItem>(() => {
     const base = scheduledBaseProgram;
 
     if (liveTakeover && liveTakeover.isActive) {
-      const subHostAccount = liveTakeover.substituteHostId
-        ? hostAccounts.find((h) => h.id === liveTakeover.substituteHostId)
-        : hostAccounts.find(
-            (h) =>
-              !isCoringaHost(h) &&
-              (h.name.toLowerCase().trim() === liveTakeover.substituteHost.toLowerCase().trim() ||
-                h.username.toLowerCase().trim() === liveTakeover.substituteHost.toLowerCase().trim())
-          );
-
-      const resolvedWhatsapp =
-        subHostAccount?.whatsapp?.trim() ||
-        liveTakeover.substituteWhatsapp?.trim() ||
-        stationConfig.whatsappNumber ||
-        '5548991984678';
-
-      // Modo Coringa Avulso: locutor entra no ar usando seu próprio perfil sem associar seu programa
-      if (liveTakeover.isCoringa && liveTakeover.coverScheduleProgram === false) {
-        return {
-          ...base,
-          id: 'coringa-live-session',
-          title: liveTakeover.coringaProgramTitle?.trim() || 'Plantão Coringa',
-          host: liveTakeover.substituteHost,
-          hostRole: liveTakeover.substituteHostRole || subHostAccount?.role || 'Apresentação Especial • Modo Coringa',
-          hostBio: subHostAccount?.bio || base.hostBio,
-          hostAccountId: liveTakeover.substituteHostId || subHostAccount?.id,
-          avatarUrl: liveTakeover.substituteAvatarUrl || subHostAccount?.avatarUrl || base.avatarUrl,
-          logoUrl: stationLogos.playerCenterLogo || stationLogos.headerLogo || stationConfig.logoUrl || '/reb_mascot.jpg',
-          genre: 'Plantão ao Vivo • Modo Coringa',
-          description:
-            liveTakeover.notes ||
-            `Transmissão especial ao vivo conduzida por ${liveTakeover.substituteHost} em Modo Coringa na Rebeldia FM.`,
-          whatsappNumber: resolvedWhatsapp,
-          isSubstituted: true,
-          isCoringaActive: true,
-          originalHost: base.host,
-          takeoverNotes: liveTakeover.notes,
-          hasReprise: false,
-          daysLabel: 'Ao Vivo Agora • Modo Coringa',
-        };
-      }
-
       return {
         ...base,
         host: liveTakeover.substituteHost,
-        hostRole: liveTakeover.substituteHostRole || subHostAccount?.role || 'Apresentação Especial / Plantão',
-        hostBio: subHostAccount?.bio || base.hostBio,
-        avatarUrl: liveTakeover.substituteAvatarUrl || subHostAccount?.avatarUrl || base.avatarUrl,
-        whatsappNumber: resolvedWhatsapp,
+        hostRole: liveTakeover.substituteHostRole || 'Apresentação Especial / Plantão',
+        avatarUrl: liveTakeover.substituteAvatarUrl || base.avatarUrl,
+        whatsappNumber: liveTakeover.substituteWhatsapp || base.whatsappNumber || stationConfig.whatsappNumber || '5548991984678',
         isSubstituted: true,
-        isCoringaActive: Boolean(liveTakeover.isCoringa),
         originalHost: base.host,
         takeoverNotes: liveTakeover.notes,
       };
     }
 
     return base;
-  }, [
-    scheduledBaseProgram,
-    liveTakeover,
-    hostAccounts,
-    stationConfig.whatsappNumber,
-    stationConfig.logoUrl,
-    stationLogos.playerCenterLogo,
-    stationLogos.headerLogo,
-  ]);
-
-  // Hotsite ativo sempre sincronizado com telefone resolvido pelo locutor e status Coringa
-  const activeHotsiteProgram = useMemo<ProgramItem | null>(() => {
-    if (!selectedHotsiteProgram) return null;
-    if (currentLiveProgram && String(currentLiveProgram.id) === String(selectedHotsiteProgram.id)) {
-      return currentLiveProgram;
-    }
-    const found = resolvedSchedulePrograms.find(
-      (p) => String(p.id) === String(selectedHotsiteProgram.id)
-    );
-    if (found) return found;
-    return {
-      ...selectedHotsiteProgram,
-      whatsappNumber: resolveProgramWhatsapp(
-        selectedHotsiteProgram,
-        hostAccounts,
-        stationConfig.whatsappNumber,
-        liveTakeover
-      ),
-    };
-  }, [
-    selectedHotsiteProgram,
-    currentLiveProgram,
-    resolvedSchedulePrograms,
-    hostAccounts,
-    stationConfig.whatsappNumber,
-    liveTakeover,
-  ]);
+  }, [scheduledBaseProgram, liveTakeover, stationConfig.whatsappNumber]);
 
   // Current Host Profile from hostAccounts (cadastro de locutores) or currentLiveProgram
   const currentHostProfile = useMemo(() => {
@@ -1992,14 +1876,12 @@ export default function App() {
                       </>
                     ) : currentLiveProgram?.isSubstituted ? (
                       <>
-                        {currentLiveProgram.isCoringaActive ? 'Coringa no Ar: ' : 'Apresentação no Ar: '}
+                        Apresentação no Ar:{' '}
                         <strong className="text-white bg-red-950/60 px-2 py-0.5 rounded border border-red-500/40">
                           {currentLiveProgram.host}
                         </strong>{' '}
                         <span className="text-xs text-zinc-400">
-                          {currentLiveProgram.id === 'coringa-live-session'
-                            ? '(Plantão Coringa sem programa titular)'
-                            : `(cumprindo horário de ${currentLiveProgram.originalHost})`}
+                          (cumprindo horário de {currentLiveProgram.originalHost})
                         </span>
                       </>
                     ) : (
@@ -2068,11 +1950,11 @@ export default function App() {
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                     <span className="text-[11px] font-black uppercase tracking-wider text-white font-mono">
-                      {currentLiveProgram.isCoringaActive ? 'CORINGA AO VIVO NO AR' : 'PROGRAMA AO VIVO NO AR'}
+                      PROGRAMA AO VIVO NO AR
                     </span>
                   </div>
                   <span className="text-[10px] text-zinc-400 font-mono">
-                    {currentLiveProgram.isCoringaActive ? 'Modo Coringa' : 'Transmissão Oficial'}
+                    Transmissão Oficial
                   </span>
                 </div>
                 <LiveProgramHeroCard
@@ -2171,7 +2053,7 @@ export default function App() {
 
             {/* Program Schedule of the Day / Weekday */}
             <TodayScheduleSection
-              programs={resolvedSchedulePrograms}
+              programs={schedulePrograms}
               currentLiveProgram={currentLiveProgram}
               onSelectProgram={handleSelectProgramHotsite}
               onOpenFullSchedule={() => {
@@ -2197,7 +2079,7 @@ export default function App() {
         {/* Tab 3: Schedule View */}
         {activeTab === 'schedule' && (
           <ScheduleView
-            programs={resolvedSchedulePrograms}
+            programs={schedulePrograms}
             currentLiveProgram={currentLiveProgram}
             onSelectProgram={handleSelectProgramHotsite}
             onOpenTakeoverModal={handleOpenTakeoverForProgram}
@@ -2231,7 +2113,7 @@ export default function App() {
             onOpenMural={() => navigateTab('mural')}
             onOpenAdmin={handleOpenAdmin}
             onOpenSettings={() => setIsSettingsOpen(true)}
-            programs={resolvedSchedulePrograms}
+            programs={schedulePrograms}
             onSelectProgram={handleSelectProgramHotsite}
           />
         )}
@@ -2310,20 +2192,6 @@ export default function App() {
 
           {/* Gerenciador / Painel Admin, Recursos & Área de Locutores */}
           <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
-            {/* Área do Locutor / Modo Coringa */}
-            <button
-              onClick={() => setIsHostAuthOpen(true)}
-              className={`inline-flex items-center gap-2 px-4 py-2 rounded-2xl border text-xs font-bold transition shadow-lg active:scale-95 cursor-pointer group ${
-                currentLoggedInHost
-                  ? 'bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border-emerald-500/40'
-                  : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white border-zinc-700 hover:border-zinc-500'
-              }`}
-              title="Acessar Área do Locutor, Editar Hotsite ou Entrar no Ar como Coringa"
-            >
-              <UserCheck className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
-              <span>{currentLoggedInHost ? `Locutor: ${currentLoggedInHost.name}` : 'Área do Locutor / Coringa'}</span>
-            </button>
-
             {/* Recursos da Plataforma */}
             <button
               onClick={() => {
@@ -2406,16 +2274,6 @@ export default function App() {
         onSavePromoBanners={handleSavePromoBanners}
         stationConfig={stationConfig}
         onSaveStationConfig={handleSaveConfig}
-        currentLoggedInHost={currentLoggedInHost}
-        hostToken={hostToken}
-        onHostLogin={handleHostLogin}
-        onHostLogout={handleHostLogout}
-        scheduleSwaps={scheduleSwaps}
-        onSwapsUpdated={setScheduleSwaps}
-        liveTakeover={liveTakeover}
-        currentLiveProgram={currentLiveProgram}
-        onStartTakeover={handleStartTakeover}
-        onStopTakeover={handleStopTakeover}
       />
 
       {/* Promoção da Hora & Banners Modal */}
@@ -2429,10 +2287,10 @@ export default function App() {
 
       {/* Program Hotsite Modal */}
       <ProgramHotsiteModal
-        program={activeHotsiteProgram}
-        isOpen={!!activeHotsiteProgram}
+        program={selectedHotsiteProgram}
+        isOpen={!!selectedHotsiteProgram}
         onClose={handleCloseProgramHotsite}
-        isLiveNow={currentLiveProgram?.id === activeHotsiteProgram?.id}
+        isLiveNow={currentLiveProgram?.id === selectedHotsiteProgram?.id}
         isPlaying={isPlaying}
         onTogglePlay={togglePlay}
         onNavigateToTab={(tab) => {
@@ -2451,49 +2309,40 @@ export default function App() {
                 title: updated.title,
                 host: updated.host,
                 hostRole: updated.hostRole || null,
-                avatarUrl: updated.avatarUrl || null,
-                logoUrl: updated.logoUrl || null,
+                            avatarUrl: updated.avatarUrl || null,
                 hostBio: updated.hostBio || null,
-                instagramHandle: updated.instagramHandle || null,
+                            instagramHandle: updated.instagramHandle || null,
+                            whatsappNumber: updated.whatsappNumber || null,
                 description: updated.description || null,
                 genre: updated.genre || null,
                 bannerUrl: updated.bannerUrl || null,
-                playlistJson: updated.playlist ? JSON.stringify(updated.playlist) : null,
-                highlightsJson: updated.highlights ? JSON.stringify(updated.highlights) : null,
-                photoGalleryJson: updated.photoGallery ? JSON.stringify(updated.photoGallery) : null,
+                            playlistJson: updated.playlist ? JSON.stringify(updated.playlist) : null,
+                            highlightsJson: updated.highlights ? JSON.stringify(updated.highlights) : null,
+                            photoGalleryJson: updated.photoGallery ? JSON.stringify(updated.photoGallery) : null,
               });
             } catch {
               // fallback to local state
             }
           }
           setSelectedHotsiteProgram(updated);
-          const updatedIcon = getProgramLogoSrc(updated);
-          const updatedSlug = getProgramSlug(updated);
-          const updatedOgImage = updatedIcon.startsWith('data:')
-            ? `/api/program-og-image/${encodeURIComponent(updatedSlug)}?v=${updatedIcon.length}`
-            : updatedIcon;
-          applyClientSeo({
-            ogImage: updatedOgImage,
-            faviconUrl: updatedIcon,
-          });
         }}
         currentLoggedInHost={currentLoggedInHost}
-        onHostLogin={handleHostLogin}
         onOpenHostAuth={() => {
           setSelectedHotsiteProgram(null);
           setIsHostAuthOpen(true);
         }}
         onOpenTakeoverModal={(prog) => {
           setSelectedHotsiteProgram(null);
-          handleOpenTakeoverForProgram(prog || currentLiveProgram, false);
+          if (prog) setTakeoverTargetProgram(prog);
+          setIsTakeoverModalOpen(true);
         }}
       />
 
-      {/* Host Auth & Profile Modal (Locutor Cadastro / Login / Recuperação / Entrar no Ar / Virar Coringa) */}
+      {/* Host Auth & Profile Modal (Locutor Cadastro / Login / Recuperação / Entrar no Ar) */}
       <HostAuthModal
         isOpen={isHostAuthOpen}
         onClose={() => setIsHostAuthOpen(false)}
-        programs={resolvedSchedulePrograms}
+        programs={schedulePrograms}
         currentLoggedInHost={currentLoggedInHost}
         onHostLogin={handleHostLogin}
         onHostLogout={handleHostLogout}
@@ -2501,31 +2350,23 @@ export default function App() {
           setIsHostAuthOpen(false);
           setSelectedHotsiteProgram(prog);
         }}
-        onOpenTakeoverModal={(prog, coringaMode) => {
-          handleOpenTakeoverForProgram(prog || currentLiveProgram, Boolean(coringaMode));
-        }}
-        onOpenFilteredPanel={() => {
-          setIsHostAuthOpen(false);
-          handleOpenAdmin();
+        onOpenTakeoverModal={(prog) => {
+          handleOpenTakeoverForProgram(prog || currentLiveProgram);
         }}
         liveTakeover={liveTakeover}
         onStopTakeover={handleStopTakeover}
         stationConfig={stationConfig}
       />
 
-      {/* Live Takeover Modal (Locutor Online / Substituição de Horário de Colega / Modo Coringa) */}
+      {/* Live Takeover Modal (Locutor Online / Substituição de Horário de Colega) */}
       <LiveTakeoverModal
         isOpen={isTakeoverModalOpen}
         onClose={() => {
           setIsTakeoverModalOpen(false);
           setTakeoverTargetProgram(null);
-          setTakeoverInitialCoringa(false);
         }}
         currentScheduledProgram={takeoverTargetProgram || scheduledBaseProgram}
-        programs={resolvedSchedulePrograms}
-        hostAccounts={hostAccounts}
-        currentLoggedInHost={currentLoggedInHost}
-        initialCoringaMode={takeoverInitialCoringa}
+        programs={schedulePrograms}
         liveTakeover={liveTakeover}
         onStartTakeover={handleStartTakeover}
         onStopTakeover={handleStopTakeover}

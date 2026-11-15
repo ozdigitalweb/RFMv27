@@ -43,22 +43,17 @@ export interface ProgramItem {
   daysLabel?: string;
   hostBio?: string;
   instagramHandle?: string;
-  whatsappNumber?: string; // Resolvido dinamicamente a partir do perfil do locutor vinculado (ou padrão da rádio)
+  whatsappNumber?: string; // Telefone WhatsApp do apresentador para pedidos musicais
   highlights?: ProgramHighlight[];
   playlist?: ProgramTrack[];
-  // Autenticação e Vínculo de Locutor (senha pertence exclusivamente ao locutor)
+  // Autenticação e Vínculo de Locutor
   hostAccountId?: string;
-  hostPassword?: string; // Campo legado ignorado na autenticação (login exclusivo por celular do locutor)
-  // Campos de Substituição / Locutor Online / Modo Coringa
+  hostPassword?: string; // Senha direta opcional do programa/hotsite
+  // Campos de Substituição / Locutor Online
   isSubstituted?: boolean;
-  isCoringaActive?: boolean;
   originalHost?: string;
   takeoverNotes?: string;
   isRebDefault?: boolean;
-  // Campos de Troca Pontual ativa no dia
-  swappedNotice?: string;
-  swappedWithTitle?: string;
-  swappedDate?: string;
   // Campos de Banner Promocional vinculado ao programa
   promoActive?: boolean;
   promoBannerUrl?: string;
@@ -71,41 +66,9 @@ export interface ProgramItem {
   seedKey?: string;
 }
 
-export type ScheduleSwapType = 'one_time' | 'permanent';
-
-export interface ScheduleSwapSlotSnapshot {
-  dayOfWeek: number;
-  startTime: string;
-  endTime: string;
-  daysLabel?: string;
-}
-
-export interface ScheduleSwapRecord {
-  id: string;
-  type: ScheduleSwapType;
-  targetDate?: string; // YYYY-MM-DD (obrigatório quando type === 'one_time')
-  sourceProgramId: string;
-  sourceProgramTitle: string;
-  sourceHostId?: string;
-  sourceHostName: string;
-  sourceSlot: ScheduleSwapSlotSnapshot;
-  targetProgramId: string;
-  targetProgramTitle: string;
-  targetHostId?: string;
-  targetHostName: string;
-  targetSlot: ScheduleSwapSlotSnapshot;
-  initiatedByHostId?: string;
-  initiatedByHostName: string;
-  note?: string;
-  status: 'active' | 'cancelled' | 'applied';
-  createdAt: number;
-  cancelledAt?: number;
-}
-
 export interface LiveTakeover {
   isActive: boolean;
   substituteHost: string; // Nome do locutor que assumiu
-  substituteHostId?: string; // ID do HostAccount do locutor que assumiu
   substituteHostRole?: string; // Ex: "Locutor Substituto / Plantão Especial"
   substituteAvatarUrl?: string; // Foto do locutor que está no ar
   substituteWhatsapp?: string; // WhatsApp direto do locutor que está no ar
@@ -113,11 +76,8 @@ export interface LiveTakeover {
   substituteInstagram?: string;
   originProgramTitle?: string; // De qual programa ele veio (se aplicável)
   targetProgramId?: string; // ID do programa original que ele está cobrindo
-  takeoverType: 'covering_colleague' | 'live_dj_session' | 'coringa';
-  isCoringa?: boolean; // True quando entrou no ar usando perfil/modo Coringa (sem usar o seu programa)
-  coverScheduleProgram?: boolean; // True = mantém programa da grade coberto; False = Plantão Coringa avulso
-  coringaProgramTitle?: string; // Título exibido em Plantão Coringa avulso
-  notes?: string; // Mensagem no ar (ex: "Cobrindo a folga do colega hoje!")
+  takeoverType: 'covering_colleague' | 'live_dj_session';
+  notes?: string; // Mensagem no ar (ex: "Cobringo o colega Carlos hoje!")
   startedAt: number;
 }
 
@@ -214,7 +174,7 @@ export interface HostAccount {
   username: string; // Nome de usuário único (ex: carlos, clara_luz)
   email: string; // E-mail único
   password: string; // Senha cadastrada
-  whatsapp?: string; // WhatsApp direto do locutor (única fonte de telefone dos seus programas)
+  whatsapp?: string; // WhatsApp direto do locutor (default da rádio)
   bio?: string; // Biografia do locutor
   avatarUrl?: string; // Foto de perfil
   role?: string; // Ex: "Locutor Titular", "DJ Residente", "Apresentador", "Locutor Oficial 24h"
@@ -222,7 +182,6 @@ export interface HostAccount {
   programId?: string; // ID legado de programa principal (retrocompatibilidade)
   programTitle?: string; // Título do programa
   isMascot?: boolean; // Se é a conta oficial REB (com os mesmos privilégios de locutor)
-  isFixedCoringa?: boolean; // Se é o perfil fixo protegido Coringa (plantão/cobertura sem programa próprio)
   securityQuestion?: string; // Pergunta para recuperação de senha
   securityAnswer?: string; // Resposta para recuperação de senha
   createdAt: number;

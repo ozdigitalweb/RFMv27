@@ -1,6 +1,5 @@
 import { OFFICIAL_SCHEDULE_ITEMS, OFFICIAL_HOSTS } from '../data/officialData';
 import { DEFAULT_RADIO_CONFIG, INITIAL_REQUESTS, INITIAL_MESSAGES, INITIAL_PROMO_BANNERS } from '../data/initialData';
-import type { ScheduleSwapRecord, ScheduleSwapType } from '../types';
 
 export interface DbSongRequest {
   id: number;
@@ -515,175 +514,67 @@ export const api = {
     }));
   },
 
-  async registerHost(
-    accountData: any,
-    recaptchaToken?: string
-  ): Promise<{ success: boolean; host?: any; token?: string; error?: string }> {
+  async registerHost(accountData: any, recaptchaToken?: string): Promise<{ success: boolean; host?: any; error?: string }> {
     try {
       const res = await fetch('/api/host-accounts/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...accountData, recaptchaToken }),
+          body: JSON.stringify({ ...accountData, recaptchaToken }),
       });
       const data = await res.json();
       if (!res.ok) {
         return { success: false, error: data.error || 'Erro ao cadastrar locutor' };
       }
-      return { success: true, host: data.host, token: data.token };
-    } catch (err: unknown) {
-      return { success: false, error: err instanceof Error ? err.message : 'Erro de conexão com o servidor' };
+      return { success: true, host: data.host };
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : 'Erro de conexão com o servidor' };
     }
   },
 
-  async loginHost(
-    phone: string,
-    password: string,
-    programId?: string,
-    recaptchaToken?: string
-  ): Promise<{ success: boolean; host?: any; token?: string; error?: string }> {
+    async loginHost(identifier: string, password: string, programId?: string, recaptchaToken?: string): Promise<{ success: boolean; host?: any; error?: string }> {
     try {
       const res = await fetch('/api/host-accounts/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, identifier: phone, password, programId, recaptchaToken }),
+          body: JSON.stringify({ identifier, password, programId, recaptchaToken }),
       });
       const data = await res.json();
       if (!res.ok) {
-        return { success: false, error: data.error || 'Celular ou senha inválidos' };
+        return { success: false, error: data.error || 'Identificador ou senha inválidos' };
       }
-      return { success: true, host: data.host, token: data.token };
-    } catch (err: unknown) {
-      return { success: false, error: err instanceof Error ? err.message : 'Erro de conexão com o servidor' };
+      return { success: true, host: data.host };
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : 'Erro de conexão com o servidor' };
     }
   },
 
-  async recoverHostPassword(
-    data: { phone?: string; identifier?: string; securityAnswer?: string; newPassword?: string },
-    recaptchaToken?: string
-  ): Promise<{ success: boolean; securityQuestion?: string; message?: string; error?: string; name?: string; username?: string }> {
+    async recoverHostPassword(data: { identifier: string; securityAnswer?: string; newPassword?: string }, recaptchaToken?: string): Promise<{ success: boolean; securityQuestion?: string; message?: string; error?: string; name?: string; username?: string }> {
     try {
-      const phone = data.phone || data.identifier || '';
       const res = await fetch('/api/host-accounts/recover-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, phone, identifier: phone, recaptchaToken }),
+          body: JSON.stringify({ ...data, recaptchaToken }),
       });
       const result = await res.json();
       if (!res.ok) {
         return { success: false, error: result.error || 'Erro ao recuperar senha' };
       }
       return { success: true, ...result };
-    } catch (err: unknown) {
-      return { success: false, error: err instanceof Error ? err.message : 'Erro de conexão com o servidor' };
-    }
-  },
-
-  async updateMyHostProfile(
-    data: {
-      name?: string;
-      role?: string;
-      bio?: string;
-      avatarUrl?: string;
-      whatsapp?: string;
-      currentPassword?: string;
-      newPassword?: string;
-    },
-    hostToken: string
-  ): Promise<{ success: boolean; host?: any; error?: string }> {
-    try {
-      const res = await fetch('/api/host-accounts/me', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-host-token': hostToken,
-        },
-        body: JSON.stringify(data),
-      });
-      const result = await res.json();
-      if (!res.ok) {
-        return { success: false, error: result.error || 'Erro ao atualizar perfil do locutor' };
-      }
-      return { success: true, host: result.host };
-    } catch (err: unknown) {
-      return { success: false, error: err instanceof Error ? err.message : 'Erro de conexão ao salvar perfil' };
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : 'Erro de conexão com o servidor' };
     }
   },
 
   async saveHostAccounts(accounts: any[]): Promise<boolean> {
-    const res = await fetch('/api/host-accounts/save-all', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accounts }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || 'Erro ao salvar contas de locutores');
-    }
-    return true;
-  },
-
-  // Troca Direta de Horários (Pontual 1 dia ou Permanente)
-  async getScheduleSwaps(): Promise<ScheduleSwapRecord[]> {
     try {
-      const res = await fetch('/api/schedule-swaps');
-      if (!res.ok) return [];
-      const data = await res.json();
-      return Array.isArray(data?.swaps) ? data.swaps : [];
-    } catch {
-      return [];
-    }
-  },
-
-  async createScheduleSwap(
-    payload: {
-      type: ScheduleSwapType;
-      targetDate?: string;
-      sourceProgramId: string | number;
-      targetProgramId: string | number;
-      note?: string;
-    },
-    auth?: { hostToken?: string | null; adminToken?: string | null }
-  ): Promise<{ success: boolean; swap?: ScheduleSwapRecord; swaps?: ScheduleSwapRecord[]; error?: string }> {
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (auth?.hostToken) headers['x-host-token'] = auth.hostToken;
-      if (auth?.adminToken) headers['x-admin-token'] = auth.adminToken;
-
-      const res = await fetch('/api/schedule-swaps', {
+      const res = await fetch('/api/host-accounts/save-all', {
         method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accounts }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        return { success: false, error: data.error || 'Erro ao realizar troca de horário' };
-      }
-      return { success: true, swap: data.swap, swaps: data.swaps };
-    } catch (err: unknown) {
-      return { success: false, error: err instanceof Error ? err.message : 'Erro de conexão ao trocar horário' };
-    }
-  },
-
-  async cancelScheduleSwap(
-    swapId: string,
-    auth?: { hostToken?: string | null; adminToken?: string | null }
-  ): Promise<{ success: boolean; swaps?: ScheduleSwapRecord[]; error?: string }> {
-    try {
-      const headers: Record<string, string> = {};
-      if (auth?.hostToken) headers['x-host-token'] = auth.hostToken;
-      if (auth?.adminToken) headers['x-admin-token'] = auth.adminToken;
-
-      const res = await fetch(`/api/schedule-swaps/${encodeURIComponent(swapId)}`, {
-        method: 'DELETE',
-        headers,
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        return { success: false, error: data.error || 'Erro ao cancelar troca de horário' };
-      }
-      return { success: true, swaps: data.swaps };
-    } catch (err: unknown) {
-      return { success: false, error: err instanceof Error ? err.message : 'Erro de conexão ao cancelar troca' };
+      return res.ok;
+    } catch {
+      return false;
     }
   },
 
@@ -763,7 +654,6 @@ export interface PageSeoData {
   ogTitle?: string;
   ogDescription?: string;
   ogImage?: string;
-  faviconUrl?: string;
   ogType?: string;
   twitterCard?: string;
   geoRegion?: string;
