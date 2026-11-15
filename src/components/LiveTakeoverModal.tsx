@@ -217,10 +217,6 @@ export const LiveTakeoverModal: React.FC<LiveTakeoverModalProps> = ({
     }
   }, [isOpen, initialCoringaMode, currentLoggedInHost, currentScheduledProgram, availableHosts, stationConfig.whatsappNumber]);
 
-  const selectedHostData = useMemo(() => {
-    return availableHosts.find((h) => h.host === selectedHostPreset) || availableHosts[0] || null;
-  }, [availableHosts, selectedHostPreset]);
-
   // Handle Preset Host Selection
   const handleSelectHostPreset = (hostName: string) => {
     setSelectedHostPreset(hostName);
