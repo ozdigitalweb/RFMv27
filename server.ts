@@ -132,7 +132,7 @@ async function startServer() {
   const memorySettingsStore = new Map<string, string>();
 
   // --- ADMIN AUTH STATE & MIDDLEWARE (Norma 8.4) ---
-  const ADMIN_USER = process.env.ADMIN_USER || 'admin@rebeldiafm.com';
+  const ADMIN_USER = (process.env.ADMIN_USER || 'admin@rebeldiafm.com.br').trim();
   const ADMIN_PASS = process.env.ADMIN_PASSWORD || 'rebeldia2026';
     const RECAPTCHA_SECRET_KEY = process.env.RECAPTCHA_SECRET_KEY || '';
     const activeAdminTokens = new Set<string>();
@@ -2061,8 +2061,14 @@ async function startServer() {
 
   // --- ADMIN AUTH & MANAGEMENT ROUTES ---
   app.post('/api/admin/login', (req, res) => {
-    const { username, password } = req.body;
-    if (username === ADMIN_USER && password === ADMIN_PASS) {
+    const username = String(req.body?.username || '').trim().toLowerCase();
+    const password = String(req.body?.password || '');
+    const configuredUser = ADMIN_USER.toLowerCase();
+    const isValidUser =
+      username === configuredUser ||
+      (!process.env.ADMIN_USER && username === 'admin@rebeldiafm.com');
+
+    if (isValidUser && password === ADMIN_PASS) {
       const token = 'rebeldia_admin_session_token_' + Date.now();
       activeAdminTokens.add(token);
       return res.json({
@@ -2886,6 +2892,11 @@ ${jsonLd}
       console.error('Error updating SEO entry:', error);
       res.status(500).json({ error: 'Falha ao salvar metadados de SEO' });
     }
+  });
+
+  // Ensure unmatched /api/* requests always return JSON instead of falling through to index.html
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'API endpoint not found' });
   });
 
   // Vite middleware in dev / Static files with SSR meta injection in production

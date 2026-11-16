@@ -44,7 +44,10 @@ export const createPool = () => {
 
     const poolConfig: any = {
       max: 10,
+      idleTimeoutMillis: 10000,
       connectionTimeoutMillis: 15000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
     };
 
     if (host) poolConfig.host = host;
@@ -59,8 +62,20 @@ export const createPool = () => {
 
     global._postgresPool = new Pool(poolConfig);
 
-    global._postgresPool.on('error', (err) => {
-      console.error('Unexpected error on idle SQL pool client:', err);
+    global._postgresPool.on('error', (err: any) => {
+      const message = String(err?.message || err || '');
+      const code = String(err?.code || '');
+      const isExpectedIdleDrop =
+        message.includes('Connection terminated unexpectedly') ||
+        message.includes('Connection terminated') ||
+        code === 'ECONNRESET' ||
+        code === 'ETIMEDOUT' ||
+        code === '57P01';
+      if (isExpectedIdleDrop) {
+        console.log('[DB Pool] Conexão ociosa reciclada pelo banco; próxima consulta abrirá nova conexão.');
+      } else {
+        console.error('[DB Pool] Erro no cliente SQL:', message);
+      }
     });
   }
   return global._postgresPool;

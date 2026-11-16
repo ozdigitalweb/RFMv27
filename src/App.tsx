@@ -24,6 +24,8 @@ import {
   Signal,
   Instagram,
   Facebook,
+  MessageCircle,
+  Disc,
 } from 'lucide-react';
 import { radioAudio, normalizeStreamUrl, DEMO_TRACKS, DemoTrack } from './utils/audioEngine';
 
@@ -137,6 +139,14 @@ export default function App() {
   }, []);
   const [selectedHotsiteProgram, setSelectedHotsiteProgram] = useState<ProgramItem | null>(null);
   const [institutionalData, setInstitutionalData] = useState<InstitutionalData>(DEFAULT_INSTITUTIONAL_DATA);
+  const [scheduleClockTick, setScheduleClockTick] = useState(() => Math.floor(Date.now() / 30000));
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setScheduleClockTick(Math.floor(Date.now() / 30000));
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Host Account State & Modal
   const [isHostAuthOpen, setIsHostAuthOpen] = useState(false);
@@ -1218,21 +1228,38 @@ export default function App() {
 
     const now = new Date();
     const currentDay = now.getDay();
-    const currentHour = now.getHours();
+    const currentMins = now.getHours() * 60 + now.getMinutes();
+
+    const toMinutes = (timeStr: string, isEnd = false) => {
+      const [hRaw, mRaw] = timeStr.split(':').map(Number);
+      const h = Number.isFinite(hRaw) ? hRaw : 0;
+      const m = Number.isFinite(mRaw) ? mRaw : 0;
+      if (isEnd && h === 23 && m === 59) return 24 * 60;
+      return h * 60 + m;
+    };
+
+    const matchesTimeWindow = (startTime: string, endTime: string) => {
+      const startMins = toMinutes(startTime, false);
+      const endMins = toMinutes(endTime, true);
+      if (startMins <= endMins) {
+        return currentMins >= startMins && currentMins < endMins;
+      }
+      return currentMins >= startMins || currentMins < endMins;
+    };
 
     let isRepriseOnAir = false;
     const matching = progList.find((p) => {
       if (p.isActive === false) return false;
 
       // 1. Transmissão Principal
-      const dayMatches = p.dayOfWeek === -1 || p.dayOfWeek === currentDay;
-      if (dayMatches && p.startTime && p.endTime) {
-        const [startH] = p.startTime.split(':').map(Number);
-        const [endH] = p.endTime.split(':').map(Number);
-        const inMainTime = startH <= endH
-          ? currentHour >= startH && currentHour < endH
-          : currentHour >= startH || currentHour < endH;
-        if (inMainTime) return true;
+      const extraDays = Array.isArray((p as any).daysOfWeek) ? ((p as any).daysOfWeek as number[]) : [];
+      const dayMatches =
+        p.dayOfWeek === -1 ||
+        p.dayOfWeek === currentDay ||
+        extraDays.includes(-1) ||
+        extraDays.includes(currentDay);
+      if (dayMatches && p.startTime && p.endTime && matchesTimeWindow(p.startTime, p.endTime)) {
+        return true;
       }
 
       // 2. Transmissão da Reprise
@@ -1242,12 +1269,7 @@ export default function App() {
         p.repriseEndTime &&
         (p.repriseDayOfWeek === -1 || p.repriseDayOfWeek === currentDay)
       ) {
-        const [rStartH] = p.repriseStartTime.split(':').map(Number);
-        const [rEndH] = p.repriseEndTime.split(':').map(Number);
-        const inRepriseTime = rStartH <= rEndH
-          ? currentHour >= rStartH && currentHour < rEndH
-          : currentHour >= rStartH || currentHour < rEndH;
-        if (inRepriseTime) {
+        if (matchesTimeWindow(p.repriseStartTime, p.repriseEndTime)) {
           isRepriseOnAir = true;
           return true;
         }
@@ -1270,7 +1292,7 @@ export default function App() {
       ...DEFAULT_REB_PROGRAM,
       whatsappNumber: resolveProgramWhatsapp(DEFAULT_REB_PROGRAM, hostAccounts, stationConfig.whatsappNumber),
     };
-  }, [resolvedSchedulePrograms, streamMetadata.song, hostAccounts, stationConfig.whatsappNumber]);
+  }, [resolvedSchedulePrograms, streamMetadata.song, hostAccounts, stationConfig.whatsappNumber, scheduleClockTick]);
 
   // Current Live Program based on base program + active takeover / Modo Coringa
   const currentLiveProgram = useMemo<ProgramItem>(() => {
@@ -1497,16 +1519,7 @@ export default function App() {
     });
 
     return liveDateBanner || activeBanners[0] || null;
-  }, [promoBanners, currentLiveProgram]);
-
-  // Verifica se há programa ao vivo na grade neste momento (ou live takeover / atração específica)
-  const isSpecificLiveProgramOnAir = useMemo(() => {
-    if (!currentLiveProgram) return false;
-    if (liveTakeover && liveTakeover.isActive) return true;
-    if (currentLiveProgram.id !== DEFAULT_REB_PROGRAM.id) return true;
-    if (currentLiveProgram.badge === 'Reprise' || currentLiveProgram.badge === 'No Ar') return true;
-    return false;
-  }, [currentLiveProgram, liveTakeover]);
+  }, [promoBanners, currentLiveProgram, scheduleClockTick]);
 
   // Handlers for Song Requests (synced with backend DB)
   const handleAddRequest = (newReq: Omit<SongRequest, 'id' | 'timestamp' | 'votes'>) => {
@@ -2029,110 +2042,273 @@ export default function App() {
               </div>
             </div>
 
-            {/* Card do Programa No Ar ou Card de Promoção (caso contrário) */}
-            {isSpecificLiveProgramOnAir && currentLiveProgram ? (
-              <div className="w-full max-w-md mx-auto">
-                <div className="flex items-center justify-between gap-2 mb-2 px-1">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="text-[11px] font-black uppercase tracking-wider text-white font-mono">
+            {/* Banner "Promoção da Hora" no topo em largura total quando ativado */}
+            {currentPromoBanner && (
+              <PromoBannerCard
+                banner={currentPromoBanner}
+                onOpenPromoModal={() => setIsPromoModalOpen(true)}
+                stationConfig={stationConfig}
+              />
+            )}
+
+            {/* Destaque Principal: Programa da Vez à Esquerda + 3 Caixas Empilhadas à Direita */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+              {/* Coluna Esquerda: Sempre o Programa da Vez no Ar (só muda no próximo horário ou takeover) */}
+              <div className="lg:col-span-5 flex flex-col">
+                <div className="flex items-center justify-between gap-2 mb-2 px-1 h-5 shrink-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                    <span className="text-[11px] font-black uppercase tracking-wider text-white font-mono truncate">
                       {currentLiveProgram.isCoringaActive ? 'CORINGA AO VIVO NO AR' : 'PROGRAMA AO VIVO NO AR'}
                     </span>
                   </div>
-                  <span className="text-[10px] text-zinc-400 font-mono">
+                  <span className="text-[10px] text-zinc-400 font-mono whitespace-nowrap shrink-0">
                     {currentLiveProgram.isCoringaActive ? 'Modo Coringa' : 'Transmissão Oficial'}
                   </span>
                 </div>
-                <LiveProgramHeroCard
-                  program={currentLiveProgram}
-                  onOpenHotsite={() => handleSelectProgramHotsite(currentLiveProgram)}
-                  stationConfig={stationConfig}
-                  promoBanner={currentPromoBanner}
-                  onOpenPromoModal={() => setIsPromoModalOpen(true)}
-                />
-              </div>
-            ) : (
-              currentPromoBanner && (
-                <PromoBannerCard
-                  banner={currentPromoBanner}
-                  onOpenPromoModal={() => setIsPromoModalOpen(true)}
-                  stationConfig={stationConfig}
-                />
-              )
-            )}
-
-            {/* Quick Action Bento Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {/* Request Music Card */}
-              <div
-                onClick={() => navigateTab('requests')}
-                className="mono-card mono-card-hover p-5 rounded-2xl cursor-pointer group flex items-center justify-between"
-              >
-                <div className="flex items-center gap-3.5 min-w-0">
-                  <div className="w-11 h-11 rounded-xl bg-zinc-800 border border-white/10 text-white flex items-center justify-center group-hover:scale-105 transition shrink-0">
-                    <Music className="w-5 h-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="font-bold text-white text-sm truncate">Pedir Música</h3>
-                    <p className="text-xs text-zinc-400 truncate">No WhatsApp do estúdio</p>
-                  </div>
+                <div className="flex-1 flex flex-col">
+                  <LiveProgramHeroCard
+                    program={currentLiveProgram}
+                    onOpenHotsite={() => handleSelectProgramHotsite(currentLiveProgram)}
+                    stationConfig={stationConfig}
+                    promoBanner={currentPromoBanner}
+                    onOpenPromoModal={() => setIsPromoModalOpen(true)}
+                  />
                 </div>
-                <ChevronRight className="w-4 h-4 text-zinc-500 group-hover:text-white transition shrink-0 ml-1" />
               </div>
 
-              {/* Promoção da Hora Card */}
-              <div
-                onClick={() => setIsPromoModalOpen(true)}
-                className="mono-card mono-card-hover p-5 rounded-2xl cursor-pointer group flex items-center justify-between border-amber-500/30 bg-gradient-to-r from-amber-500/5 to-transparent relative overflow-hidden"
-              >
-                <div className="flex items-center gap-3.5 min-w-0">
-                  <div className="w-11 h-11 rounded-xl bg-amber-500 text-black flex items-center justify-center group-hover:scale-105 transition shrink-0 shadow-lg shadow-amber-500/20">
-                    <Gift className="w-5 h-5 stroke-[2.5]" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <h3 className="font-bold text-white text-sm truncate">Promoção da Hora</h3>
-                      <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-amber-400 text-black">
-                        NO AR
-                      </span>
+              {/* Coluna Direita: 3 Caixas Empilhadas Verticalmente com Conteúdo Completo */}
+              <div className="lg:col-span-7 lg:pt-7 flex flex-col gap-4">
+                {/* Caixa 1 (Topo): Pedir Música */}
+                <div
+                  onClick={() => navigateTab('requests')}
+                  className="mono-card mono-card-hover flex-1 p-5 rounded-3xl cursor-pointer group flex flex-col justify-between gap-3.5 border border-white/10 hover:border-amber-500/40 transition-all"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      <div className="w-12 h-12 rounded-2xl bg-zinc-800/90 border border-white/10 text-amber-400 flex items-center justify-center group-hover:scale-105 transition shrink-0">
+                        <Music className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-black text-white text-base tracking-tight">Pedir Música</h3>
+                          <span className="text-xs text-zinc-400 tabular-nums">
+                            · {requests.length} {requests.length === 1 ? 'pedido na fila' : 'pedidos na fila'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-zinc-400 mt-0.5 leading-relaxed">
+                          Escolha sua música favorita, envie sua dedicatória e acompanhe o ranking dos ouvintes ao vivo.
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-xs text-amber-300/80 truncate">Sorteios & Brindes</p>
+                    <ChevronRight className="w-4 h-4 text-zinc-500 group-hover:text-white transition shrink-0 mt-1" />
                   </div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-amber-400 group-hover:text-white transition shrink-0 ml-1" />
-              </div>
 
-              {/* Unified Install App Card (Android & Apple) */}
-              <div
-                onClick={() => openInstallModal()}
-                className="mono-card mono-card-hover p-5 rounded-2xl cursor-pointer group flex items-center justify-between border-white/10 hover:border-emerald-500/40 bg-gradient-to-r from-zinc-900/90 via-zinc-900/70 to-emerald-950/20 transition-all duration-300 relative overflow-hidden"
-              >
-                <div className="flex items-center gap-3.5 min-w-0">
-                  {/* Dual distinct badges with overlap & micro-interaction */}
-                  <div className="flex items-center -space-x-2.5 shrink-0 pl-0.5 py-0.5">
-                    <div className="w-10 h-10 rounded-xl bg-zinc-900 border border-emerald-500/40 flex items-center justify-center shadow-md shadow-black/40 z-10 group-hover:-translate-x-0.5 group-hover:scale-105 transition-all">
-                      <AndroidIcon className="w-5 h-5 drop-shadow" />
+                  {/* Último pedido real na fila + ações */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-white/10">
+                    {requests[0] ? (
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        {requests[0].artworkUrl ? (
+                          <img
+                            src={requests[0].artworkUrl}
+                            alt={requests[0].songTitle}
+                            referrerPolicy="no-referrer"
+                            className="w-9 h-9 rounded-xl object-cover border border-white/10 shrink-0"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          <div className="w-9 h-9 rounded-xl bg-zinc-900 border border-white/10 flex items-center justify-center shrink-0">
+                            <Disc className="w-4 h-4 text-amber-400" />
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[11px] font-bold text-white min-w-0">
+                            <MarqueeText
+                              text={`Último pedido: ${requests[0].songTitle} — ${requests[0].artist}`}
+                              className="text-zinc-100"
+                            />
+                          </div>
+                          <p className="text-[11px] text-zinc-400 truncate">
+                            Por {requests[0].listenerName}
+                            {requests[0].city ? ` (${requests[0].city})` : ''}
+                            {typeof requests[0].votes === 'number' ? ` · ${requests[0].votes} votos` : ''}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-zinc-400">
+                        Estúdio aberto para pedidos e dedicatórias ao vivo.
+                      </p>
+                    )}
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <a
+                        href={`https://wa.me/${stationConfig.whatsappNumber.replace(/\D/g, '')}?text=${encodeURIComponent('Olá Rebeldia FM! Quero pedir uma música na programação ao vivo:')}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="min-h-[40px] px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-white/10 hover:border-emerald-500/40 text-zinc-200 hover:text-emerald-300 text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>WhatsApp</span>
+                      </a>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigateTab('requests');
+                        }}
+                        className="min-h-[40px] px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-black transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                      >
+                        <span>Fazer Pedido</span>
+                        <ChevronRight className="w-3.5 h-3.5 text-black shrink-0" />
+                      </button>
                     </div>
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-zinc-800 to-zinc-900 border border-white/20 flex items-center justify-center shadow-md shadow-black/40 z-0 group-hover:translate-x-0.5 group-hover:scale-105 transition-all">
-                      <AppleIcon className="w-4 h-4 text-white drop-shadow" />
-                    </div>
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <h3 className="font-bold text-white text-sm truncate">Instalar Aplicativo</h3>
-                      <span className="px-1.5 py-0.5 rounded text-[9px] font-black tracking-wider uppercase bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
-                        GRÁTIS
-                      </span>
-                    </div>
-                    <p className="text-xs text-zinc-400 truncate flex items-center gap-1.5 mt-0.5">
-                      <span className="text-emerald-400/90 font-medium">Android</span>
-                      <span className="text-zinc-600 font-bold">•</span>
-                      <span className="text-zinc-300 font-medium">Apple (iPhone)</span>
-                    </p>
                   </div>
                 </div>
-                <div className="w-8 h-8 rounded-full bg-zinc-800/80 group-hover:bg-emerald-500 group-hover:text-black text-zinc-400 flex items-center justify-center transition-colors shrink-0 ml-2 shadow-sm">
-                  <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+
+                {/* Caixa 2 (Meio): Promoção da Hora */}
+                <div
+                  onClick={() => setIsPromoModalOpen(true)}
+                  className="mono-card mono-card-hover flex-1 p-5 rounded-3xl cursor-pointer group flex flex-col justify-between gap-3.5 border border-amber-500/35 bg-gradient-to-r from-amber-500/10 via-zinc-950/80 to-transparent relative overflow-hidden transition-all"
+                >
+                  <div className="flex items-start justify-between gap-3.5 relative z-10">
+                    <div className="flex items-start gap-3.5 min-w-0 flex-1">
+                      <div className="w-12 h-12 rounded-2xl bg-amber-500 text-black flex items-center justify-center group-hover:scale-105 transition shrink-0 shadow-lg shadow-amber-500/20">
+                        <Gift className="w-5 h-5 stroke-[2.5]" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-black text-white text-base tracking-tight">Promoção da Hora</h3>
+                          <span className="text-[11px] font-black uppercase tracking-wider text-amber-400">
+                            · {currentPromoBanner?.badge || 'NO AR'}
+                          </span>
+                        </div>
+                        <p className="text-sm font-bold text-amber-200 mt-0.5 line-clamp-1">
+                          {currentPromoBanner?.title || 'Sorteios & Brindes Exclusivos Rebeldia FM'}
+                        </p>
+                        <p className="text-xs text-zinc-300/90 mt-1 line-clamp-2 leading-relaxed">
+                          {currentPromoBanner?.description ||
+                            'Concorra a camisetas, ingressos e kits especiais da emissora participando ao vivo com a nossa equipe.'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {currentPromoBanner?.bannerUrl && (
+                      <div className="hidden sm:block w-24 h-16 rounded-xl overflow-hidden border border-amber-500/30 shrink-0 bg-zinc-900">
+                        <img
+                          src={currentPromoBanner.bannerUrl}
+                          alt={currentPromoBanner.title}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-amber-500/20 relative z-10">
+                    <div className="text-xs text-zinc-400 truncate">
+                      {currentPromoBanner?.programTitle
+                        ? `Vinculada ao programa: ${currentPromoBanner.programTitle}`
+                        : 'Sorteios diários durante a programação oficial'}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsPromoModalOpen(true);
+                        }}
+                        className="min-h-[40px] px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-zinc-200 hover:text-white text-xs font-bold transition whitespace-nowrap cursor-pointer"
+                      >
+                        Ver Detalhes
+                      </button>
+                      <a
+                        href={
+                          currentPromoBanner?.actionUrl && currentPromoBanner.actionUrl.startsWith('http')
+                            ? currentPromoBanner.actionUrl
+                            : `https://wa.me/${stationConfig.whatsappNumber.replace(/\D/g, '')}?text=${encodeURIComponent(
+                                `Olá Rebeldia FM! Quero participar da Promoção da Hora: *${
+                                  currentPromoBanner?.title || 'Sorteios & Brindes'
+                                }*!`
+                              )}`
+                        }
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="min-h-[40px] px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-black transition flex items-center gap-1.5 whitespace-nowrap"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5 text-black shrink-0" />
+                        <span>Participar</span>
+                      </a>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Caixa 3 (Base): Instalar Aplicativo */}
+                <div
+                  onClick={() => openInstallModal()}
+                  className="mono-card mono-card-hover flex-1 p-5 rounded-3xl cursor-pointer group flex flex-col justify-between gap-3.5 border border-white/10 hover:border-emerald-500/40 bg-gradient-to-r from-zinc-900/90 via-zinc-900/70 to-emerald-950/20 transition-all duration-300 relative overflow-hidden"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3.5 min-w-0">
+                      <div className="flex items-center -space-x-2.5 shrink-0 pt-0.5">
+                        <div className="w-11 h-11 rounded-xl bg-zinc-900 border border-emerald-500/40 flex items-center justify-center shadow-md shadow-black/40 z-10 group-hover:-translate-x-0.5 group-hover:scale-105 transition-all">
+                          <AndroidIcon className="w-5 h-5 drop-shadow" />
+                        </div>
+                        <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-zinc-800 to-zinc-900 border border-white/20 flex items-center justify-center shadow-md shadow-black/40 z-0 group-hover:translate-x-0.5 group-hover:scale-105 transition-all">
+                          <AppleIcon className="w-4 h-4 text-white drop-shadow" />
+                        </div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-black text-white text-base tracking-tight">Instalar Aplicativo</h3>
+                          <span className="text-[11px] font-black uppercase tracking-wider text-emerald-400">
+                            · Grátis · Sem Loja
+                          </span>
+                        </div>
+                        <p className="text-xs text-zinc-300/90 mt-1 leading-relaxed">
+                          Ouça a Rebeldia FM em segundo plano com a tela bloqueada, abertura instantânea em tela cheia e atalho direto no celular ou PC.
+                        </p>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-zinc-400 group-hover:text-emerald-400 transition shrink-0 mt-1" />
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-white/10">
+                    <span className="text-xs text-zinc-400">
+                      Leve · Áudio contínuo · Android, iPhone e Desktop
+                    </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openInstallModal('android');
+                        }}
+                        className="min-h-[40px] px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-emerald-500/35 text-emerald-300 hover:text-emerald-200 text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                      >
+                        <AndroidIcon className="w-4 h-4 shrink-0" />
+                        <span>Android</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openInstallModal('ios');
+                        }}
+                        className="min-h-[40px] px-3.5 py-2 rounded-xl bg-white hover:bg-zinc-200 text-black text-xs font-black transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                      >
+                        <AppleIcon className="w-3.5 h-3.5 text-black shrink-0" />
+                        <span>iPhone</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
