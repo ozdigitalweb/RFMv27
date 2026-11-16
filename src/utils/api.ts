@@ -708,12 +708,13 @@ export const api = {
   async getPageSeoList(): Promise<PageSeoData[]> {
     try {
       const res = await fetch('/api/seo', { cache: 'no-store' });
-      if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
         if (Array.isArray(data)) return data;
       }
-    } catch (e) {
-      console.error('Error fetching SEO list:', e);
+    } catch {
+      // Ignore transient network/proxy non-JSON responses
     }
     return [];
   },
@@ -721,11 +722,12 @@ export const api = {
   async getPageSeo(path: string): Promise<PageSeoData | null> {
     try {
       const res = await fetch(`/api/seo/entry?path=${encodeURIComponent(path)}`, { cache: 'no-store' });
-      if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
         return await res.json();
       }
-    } catch (e) {
-      console.error('Error fetching SEO entry:', e);
+    } catch {
+      // Ignore transient network/proxy non-JSON responses
     }
     return null;
   },
@@ -742,11 +744,12 @@ export const api = {
         },
         body: JSON.stringify(seoData),
       });
-      const data = await res.json();
+      const contentType = res.headers.get('content-type') || '';
+      const data = contentType.includes('application/json') ? await res.json() : null;
       if (!res.ok) {
-        return { success: false, error: data.error || 'Falha ao salvar SEO' };
+        return { success: false, error: data?.error || `Falha ao salvar SEO (HTTP ${res.status})` };
       }
-      return { success: true, data };
+      return { success: true, data: data || seoData };
     } catch (err: any) {
       return { success: false, error: err.message || 'Erro de conexão ao salvar SEO' };
     }

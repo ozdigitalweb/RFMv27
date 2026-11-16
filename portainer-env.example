@@ -9,10 +9,12 @@ DB_PASSWORD=senha-forte-do-banco-aqui
 DB_NAME=rebeldiafm
 
 # ---------- APP ----------
-ADMIN_USER=admin@seudominio.com.br
+ADMIN_USER=admin@rebeldiafm.com.br
 ADMIN_PASSWORD=senha-super-segura-minimo-16-chars
+SESSION_SECRET=chave-secreta-sessao-minimo-32-chars
+APP_URL=https://www.rebeldiafm.com.br
 GEMINI_API_KEY=sua-chave-gemini-aqui
-RECAPTCHA_SECRET_KEY=6LcjVhcuAAAAAIFWwnG1vKVUe_dvlEZAwGLZIOp-
+RECAPTCHA_SECRET_KEY=sua-chave-secreta-recaptcha-aqui
 
 # ---------- IMAGEM (atualizada automaticamente pelo GitHub Actions) ----------
 APP_IMAGE=ghcr.io/ozdigitalweb/rfmv27:producao

@@ -29,7 +29,14 @@ async function executeMigrationsOnce(): Promise<{ applied: string[]; alreadyAppl
     poolConfig.connectionString = process.env.DATABASE_URL;
   }
 
-  const migrationPool = new Pool(poolConfig);
+  const migrationPool = new Pool({
+    ...poolConfig,
+    idleTimeoutMillis: 5000,
+    keepAlive: true,
+  });
+  migrationPool.on('error', (err: any) => {
+    console.log('[Migrator] Conexão SQL ociosa reciclada:', err?.message || err);
+  });
   const migrationDb = drizzle(migrationPool);
 
   try {

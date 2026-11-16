@@ -123,9 +123,6 @@ interface AdminManagerModalProps {
   onStopTakeover?: () => Promise<void> | void;
 }
 
-const DEFAULT_ADMIN_USER = 'admin@rebeldiafm.com';
-const DEFAULT_ADMIN_PASS = 'rebeldia2026';
-
 const DAYS_MAP = [
   { id: -1, label: 'Todos os Dias / Diário', short: 'Diário' },
   { id: 1, label: 'Segunda-feira', short: 'Seg' },
@@ -1900,7 +1897,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                         required
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
-                        placeholder="admin@rebeldiafm.com"
+                        placeholder="admin@rebeldiafm.com.br"
                         className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs focus:outline-none focus:border-amber-400 transition"
                       />
                     </div>
@@ -6382,7 +6379,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                       </div>
                       <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800">
                         <span className="text-zinc-500 block text-[10px]">Credenciais do Painel:</span>
-                        <span className="text-zinc-300 font-mono">admin@rebeldiafm.com / rebeldia2026</span>
+                        <span className="text-zinc-300 font-mono">ADMIN_USER / ADMIN_PASSWORD (ambiente do servidor)</span>
                       </div>
                     </div>
                   </div>

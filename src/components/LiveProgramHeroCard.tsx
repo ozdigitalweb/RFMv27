@@ -80,7 +80,7 @@ export const LiveProgramHeroCard: React.FC<LiveProgramHeroCardProps> = ({
   return (
     <div
       onClick={onOpenHotsite}
-      className="group relative rounded-3xl overflow-hidden bg-zinc-950 border border-amber-500 shadow-amber-500/10 shadow-2xl transition-all duration-300 cursor-pointer hover:shadow-amber-500/20 hover:-translate-y-1 w-full"
+      className="group relative rounded-3xl overflow-hidden bg-zinc-950 border border-amber-500 shadow-amber-500/10 shadow-2xl transition-all duration-300 cursor-pointer hover:shadow-amber-500/20 hover:-translate-y-1 w-full h-full flex flex-col"
     >
       {/* Box Top Banner Cover */}
       <div className="relative h-48 sm:h-52 w-full overflow-hidden bg-zinc-900">
@@ -175,7 +175,7 @@ export const LiveProgramHeroCard: React.FC<LiveProgramHeroCardProps> = ({
       </div>
 
       {/* Box Content Body */}
-      <div className="p-5 flex flex-col space-y-4">
+      <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
         <div className="space-y-3">
           {/* Host Info Section inside Vertical Box */}
           <div className="flex items-center gap-3.5 pb-3 border-b border-zinc-800/80">
