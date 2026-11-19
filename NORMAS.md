@@ -68,6 +68,13 @@ Plataforma web e PWA da Rebeldia FM ("radio LIVRE"): React 19, TypeScript, Vite 
 - **6.4** Variáveis `VITE_*` entram no front na hora do build: declare-as como build args no Dockerfile e no compose.
 - **6.5** Nunca versione `.env`, chaves ou senhas. `GEMINI_API_KEY` só no servidor, jamais com prefixo `VITE_`.
 - **6.6** `firebase-applet-config.json` só pode conter a configuração pública do cliente web do Firebase.
+- **6.7** Antes de qualquer deploy, leia esta seção e confirme o estado real da VPS: containers, projeto Compose, arquivo/stack do Portainer, imagem, portas publicadas e volumes. Não deduza a configuração de produção apenas pelos arquivos locais.
+- **6.8** Referência atual de produção (validada em 2026-11-18): stack/projeto Portainer `rebeldiafm`, serviço PostgreSQL `db`, volume Docker `rebeldiafm_postgres_data` e app publicado em `127.0.0.1:3000`. A stack `rebeldiafm-current` é legada e não deve ser iniciada nem usada para deploy. Reconfirme essa referência se a infraestrutura mudar.
+- **6.9** É proibido criar uma stack/projeto Compose paralelo para atualizar a aplicação. O nome do projeto determina redes e volumes; antes de executar `docker compose up`, confirme que ele reutiliza a stack existente `rebeldiafm` e o volume de produção. Nunca recrie o banco para atualizar somente o app.
+- **6.10** Antes de deploy, faça `pg_dump` do banco de produção e confirme que o arquivo não está vazio. Nunca execute `docker compose down -v`, `docker volume rm` ou `docker system prune --volumes` sem autorização explícita e confirmação de backup restaurável. Nunca apague ou compartilhe dumps com dados reais.
+- **6.11** O workflow do GitHub em `producao` constrói e publica a imagem `ghcr.io/ozdigitalweb/rfmv27:producao`; isso, por si só, não atualiza a VPS. Atualize a imagem no app da stack Portainer existente. Não altere o serviço `db`, as credenciais ou os volumes durante deploy do app.
+- **6.12** Se a porta de produção estiver ocupada, identifique o container/processo dono antes de agir. Pare somente o app antigo, nunca o banco nem um `docker-proxy` genérico. Se houver erro, pare e reporte o estado; não crie outra stack como tentativa.
+- **6.13** A imagem de runtime deve incluir `server/migrations`. Após o deploy, confirme que o container usa a imagem/digest esperado, que `/api/health` retorna `status: ok` e `db: ok`, e que o site público serve os assets novos. Só então informe que produção foi atualizada.
 
 ---
 
@@ -90,7 +97,7 @@ Plataforma web e PWA da Rebeldia FM ("radio LIVRE"): React 19, TypeScript, Vite 
 ---
 
 ## 9. GIT
-- **9.1** Branches: `main` (integração, onde o AI Studio publica) e `production` (o que a VPS baixa, atualizada por Pull Request `main` -> `production`).
+- **9.1** Branches: `main` (integração, onde o AI Studio publica) e `producao` (branch de produção que aciona a publicação da imagem GHCR). O workflow não faz, sozinho, o redeploy da stack Portainer.
 - **9.2** Nunca presuma outras branches e não tente criar nem trocar de branch.
 - **9.3** Commits no padrão `feat(<modulo>): ...`, `fix(<modulo>): ...`, `chore: ...`, `docs: ...`, uma tarefa por commit sempre que possível.
 - **9.4** Documente o fluxo em `CONTRIBUTING.md`, com modelo de Pull Request e checklist.
